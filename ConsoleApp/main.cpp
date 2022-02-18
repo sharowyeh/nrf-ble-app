@@ -717,6 +717,7 @@ static void on_connected(const ble_gap_evt_t * const p_ble_gap_evt)
 
 	err_code = sd_ble_gap_authenticate(m_adapter, m_connection_handle, &sec_params);
 	printf("Auth code=%d\n", err_code);
+	//TODO: return NRF_ERROR_INVALID_PARAM from my test target
 	fflush(stdout);
 	//TODO: should wait before param updated event to auth secure param(or passkey) to bond
     //service_discovery_start();
