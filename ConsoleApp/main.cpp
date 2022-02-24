@@ -431,6 +431,11 @@ static bool get_uuid_string(uint16_t uuid, char *uuid_string) {
 		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "Report");
 		result = true;
 		break;
+	// descriptor
+	case BLE_UUID_DESCRIPTOR_CLIENT_CHAR_CONFIG:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "ClientCharConfig");
+		result = true;
+		break;
 	default:
 		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "GoChkSDK");
 		result = false;
@@ -1035,6 +1040,27 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 			   uuid_string);
         fflush(stdout);
 
+		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid ==
+			BLE_UUID_DESCRIPTOR_CLIENT_CHAR_CONFIG)
+		{
+			// TODO: check the notification bit, then set CCCD handle for HVX
+			uint32_t error_code = 0;
+
+			ble_gattc_handle_range_t range[1];
+			range[0].start_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
+			range[0].end_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
+			error_code = sd_ble_gattc_char_value_by_uuid_read(
+				m_adapter,
+				m_connection_handle,
+				&(p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid),
+				range
+			);
+			printf(" DEBUG read char from uuid:0x%04X handle:0x%04X %d\n",
+				p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid,
+				p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle,
+				error_code);
+		}
+
         if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid ==
 			BLE_UUID_GAP_CHARACTERISTIC_DEVICE_NAME)
         {
@@ -1054,7 +1080,10 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 				&(p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid),
 				range
 			);
-			printf(" get char by uuid %d\n", error_code);
+			printf(" DEBUG read char from uuid:0x%04X handle:0x%04X code:%d\n",
+				p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid,
+				p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle,
+				error_code);
 
         }
     }
@@ -1087,7 +1116,7 @@ static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 	char read_str[128] = { 0 };
 	memcpy_s(&read_str[0], offset, p_data, offset);
 	//sprintf_s(read_str, len + 1, "%s", (char *)handle);
-	printf("DEBUG: read char=%s\n", read_str);
+	printf("DEBUG: read0:0x%x,%d char:%s\n", *p_data, offset, read_str);
 	fflush(stdout);
 }
 
