@@ -99,6 +99,13 @@ enum
 #define TARGET_DEV_NAME "Nordic_HRM" /**< Connect to a peripheral using a given advertising name here. */
 #define MAX_PEER_COUNT 1            /**< Maximum number of peer's application intends to manage. */
 
+// service
+#define BLE_UUID_BATTERY_SRV 0x180F
+#define BLE_UUID_HID_SRV 0x1812
+// characteristic, from SDK
+#define 	BLE_UUID_PROTOCOL_MODE_CHAR   0x2A4E
+#define 	BLE_UUID_REPORT_CHAR   0x2A4D
+
 // force stop using example function
 //#define BLE_UUID_HEART_RATE_SERVICE          0x180D /**< Heart Rate service UUID. */
 //#define BLE_UUID_HEART_RATE_MEASUREMENT_CHAR 0x2A37 /**< Heart Rate Measurement characteristic UUID. */
@@ -392,6 +399,46 @@ static bool get_adv_name(const ble_gap_evt_adv_report_t *p_adv_report, char * na
 	return false;
 }
 
+static bool get_uuid_string(uint16_t uuid, char *uuid_string) {
+	if (uuid_string == NULL) {
+		return false;
+	}
+	bool result = false;
+	switch (uuid) {
+	// service uuids
+	case BLE_UUID_GAP:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "GAP");
+		break;
+	case BLE_UUID_GATT:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "GATT");
+		break;
+	case BLE_UUID_BATTERY_SRV:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "BATTERY");
+		break;
+	case BLE_UUID_HID_SRV:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "HID");
+		break;
+	// characteristic uuids
+	case BLE_UUID_GAP_CHARACTERISTIC_DEVICE_NAME:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "Device Name");
+		result = true;
+		break;
+	case BLE_UUID_PROTOCOL_MODE_CHAR:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "Protocol Mode");
+		result = true;
+		break;
+	case BLE_UUID_REPORT_CHAR:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "Report");
+		result = true;
+		break;
+	default:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "GoChkSDK");
+		result = false;
+		break;
+	}
+	return result;
+}
+
 /**@brief Function for initializing the BLE stack.
  *
  * @return NRF_SUCCESS on success, otherwise an error code.
@@ -505,6 +552,23 @@ static uint32_t ble_cfg_set(uint8_t conn_cfg_tag)
         return error_code;
     }
 
+	//TODO: code block from nordic_uart_client
+#if NRF_SD_BLE_API >= 5
+#define NRF_SDH_BLE_GAP_EVENT_LENGTH 320
+#define NRF_SDH_BLE_GATT_MAX_MTU_SIZE 247
+	memset(&ble_cfg, 0, sizeof(ble_cfg));
+	ble_cfg.conn_cfg.conn_cfg_tag = conn_cfg_tag;
+	ble_cfg.conn_cfg.params.gap_conn_cfg.conn_count = 1;
+	ble_cfg.conn_cfg.params.gap_conn_cfg.event_length = NRF_SDH_BLE_GAP_EVENT_LENGTH;
+	error_code = sd_ble_cfg_set(m_adapter, BLE_CONN_CFG_GAP, &ble_cfg, ram_start);
+	if (error_code != NRF_SUCCESS)
+	{
+		printf("sd_ble_cfg_set() failed when attempting to set BLE_CONN_CFG_GAP. Error code: 0x%02X\n", error_code);
+		fflush(stdout);
+		return error_code;
+	}
+#endif
+
     return NRF_SUCCESS;
 }
 #endif
@@ -553,6 +617,11 @@ static uint32_t conn_start()
 	m_connection_param.max_conn_interval = MAX_CONNECTION_INTERVAL;
 	m_connection_param.slave_latency = 10;
 	m_connection_param.conn_sup_timeout = CONNECTION_SUPERVISION_TIMEOUT;
+	printf("DEBUG: given conn params for conn start min=%d max=%d late=%d timeout=%d",
+		(int)(m_connection_param.min_conn_interval * 1.25),
+		(int)(m_connection_param.max_conn_interval * 1.25),
+		m_connection_param.slave_latency,
+		(int)(m_connection_param.conn_sup_timeout / 100));
 
 	uint32_t err_code;
 	err_code = sd_ble_gap_connect(m_adapter,
@@ -575,8 +644,6 @@ static uint32_t conn_start()
 	return err_code;
 }
 
-// definitions for service uuid
-#define BLE_UUID_BATTERY 0x18F
 // attempt to discovery multiple service uuids
 std::vector<ble_uuid_t> srvc_uuids;
 
@@ -586,27 +653,22 @@ std::vector<ble_uuid_t> srvc_uuids;
  *
  * @return NRF_SUCCESS on success, otherwise an error code.
  */
-static uint32_t service_discovery_start()
+static uint32_t service_discovery_start(uint16_t uuid, uint8_t type)
 {
     uint32_t   err_code;
     uint16_t   start_handle = 0x01;
     ble_uuid_t srvc_uuid;
 
-    printf("Discovering primary services\n");
+    printf("Discovering primary service:%0x04X\n", uuid);
     fflush(stdout);
 
-	// DEBUG: generate multiple service uuids
-	srvc_uuids.clear();
-	srvc_uuids.push_back(ble_uuid_t{ (uint16_t)BLE_UUID_GAP, (uint8_t)BLE_UUID_TYPE_BLE });
-	srvc_uuids.push_back(ble_uuid_t{ (uint16_t)BLE_UUID_BATTERY, (uint8_t)BLE_UUID_TYPE_BLE });
-
-    srvc_uuid.type = BLE_UUID_TYPE_BLE;
-    srvc_uuid.uuid = BLE_UUID_GAP;
+	srvc_uuid.type = type;
+    srvc_uuid.uuid = uuid;
 
     // Initiate procedure to find the primary BLE_UUID_HEART_RATE_SERVICE.
     err_code = sd_ble_gattc_primary_services_discover(m_adapter,
                                                       m_connection_handle, start_handle,
-                                                      &srvc_uuid);
+                                                      &srvc_uuid/*NULL*/);
     if (err_code != NRF_SUCCESS)
     {
         printf("Failed to initiate or continue a GATT Primary Service Discovery procedure\n");
@@ -616,21 +678,34 @@ static uint32_t service_discovery_start()
     return err_code;
 }
 
+static uint32_t service_discovery_start()
+{
+	// DEBUG: generate multiple service uuids
+	srvc_uuids.clear();
+	srvc_uuids.push_back(ble_uuid_t{ (uint16_t)BLE_UUID_GAP, (uint8_t)BLE_UUID_TYPE_BLE });
+	srvc_uuids.push_back(ble_uuid_t{ (uint16_t)BLE_UUID_BATTERY_SRV, (uint8_t)BLE_UUID_TYPE_BLE });
+	srvc_uuids.push_back(ble_uuid_t{ (uint16_t)BLE_UUID_HID_SRV, (uint8_t)BLE_UUID_TYPE_BLE });
+
+	return service_discovery_start(BLE_UUID_HID_SRV, BLE_UUID_TYPE_BLE);
+}
+
 /**@brief Function called upon discovering a BLE peripheral's primary service(s).
  *
  * @details Initiates service's (m_service) characteristic discovery.
  *
  * @return NRF_SUCCESS on success, otherwise an error code.
  */
-static uint32_t char_discovery_start()
+static uint32_t char_discovery_start(ble_gattc_handle_range_t handle_range)
 {
-    ble_gattc_handle_range_t handle_range;
+	if (handle_range.start_handle == 0 &&
+		handle_range.end_handle == handle_range.start_handle) {
+		handle_range.start_handle = m_service_start_handle;
+		handle_range.end_handle = m_service_end_handle;
+	}
 
-    printf("Discovering characteristics\n");
+    printf("Discovering characteristics, handle range:0x%04X - 0x%04X\n",
+		handle_range.start_handle, handle_range.end_handle);
     fflush(stdout);
-
-    handle_range.start_handle = m_service_start_handle;
-    handle_range.end_handle = m_service_end_handle;
 
     return sd_ble_gattc_characteristics_discover(m_adapter, m_connection_handle, &handle_range);
 }
@@ -641,22 +716,24 @@ static uint32_t char_discovery_start()
  *
  * @return NRF_SUCCESS on success, otherwise an error code.
  */
-static uint32_t descr_discovery_start()
+static uint32_t descr_discovery_start(ble_gattc_handle_range_t handle_range)
 {
-    ble_gattc_handle_range_t handle_range;
+	if (handle_range.start_handle == 0 &&
+		handle_range.end_handle == handle_range.start_handle) {
+		handle_range.start_handle = m_service_start_handle;
+		handle_range.end_handle = m_service_end_handle;
+	}
 
-    printf("Discovering characteristic's descriptors\n");
-    fflush(stdout);
-
-    if (m_hrm_char_handle == 0)
+    /*if (m_hrm_char_handle == 0)
     {
         printf("No heart rate measurement characteristic handle found\n");
         fflush(stdout);
         return NRF_ERROR_INVALID_STATE;
-    }
+    }*/
 
-    handle_range.start_handle   = m_service_start_handle;
-    handle_range.end_handle     = m_service_end_handle;
+	printf("Discovering characteristic's descriptors, handle range:0x%04X - 0x%04X\n",
+		handle_range.start_handle, handle_range.end_handle);
+	fflush(stdout);
 
     return sd_ble_gattc_descriptors_discover(m_adapter, m_connection_handle, &handle_range);
 }
@@ -707,20 +784,30 @@ static void on_connected(const ble_gap_evt_t * const p_ble_gap_evt)
     m_connection_handle         = p_ble_gap_evt->conn_handle;
     m_connection_is_in_progress = false;
 
-	uint32_t err_code;
-	//TODO: check default value for secure update
+	uint32_t error_code;
+	ble_gap_conn_sec_t conn_sec;
+	error_code = sd_ble_gap_conn_sec_get(m_adapter, m_connection_handle, &conn_sec);
+	printf("DEBUG: get security code=%d mode=%d level=%d\n", error_code, conn_sec.sec_mode.sm, conn_sec.sec_mode.lv);
+
+	//NOTICE: refer to driver, testcase_security.cpp
 	ble_gap_sec_params_t sec_params;
 	sec_params.bond = 1;
 	sec_params.keypress = 0;
-	sec_params.io_caps = 3;
+	sec_params.io_caps = BLE_GAP_IO_CAPS_NONE;
 	sec_params.oob = 0;
+	sec_params.min_key_size = 7; /*header default from driver test_util_adapater_wrapper*/
+	sec_params.max_key_size = 16; /*header default from driver test_util_adapater_wrapper*/
 
-	err_code = sd_ble_gap_authenticate(m_adapter, m_connection_handle, &sec_params);
-	printf("Auth code=%d\n", err_code);
-	//TODO: return NRF_ERROR_INVALID_PARAM from my test target
+	error_code = sd_ble_gap_authenticate(m_adapter, m_connection_handle, &sec_params);
+	// NOTICE: return NRF_ERROR_NOT_SUPPORTED, for the debug device may not use legacy passkey
+	//         driver test case uses for passkey auth, refer to testcase_security.cpp
+	if (error_code != NRF_SUCCESS) {
+	}
+	printf("DEBUG: auth code=%d\n", error_code);
 	fflush(stdout);
-	//TODO: should wait before param updated event to auth secure param(or passkey) to bond
-    //service_discovery_start();
+
+	//TODO: should wait before param updated event or bond for auth secure param(or passkey)
+	//service_discovery_start();
 }
 
 std::vector<std::string> addr_list;
@@ -811,9 +898,6 @@ static void on_service_discovery_response(const ble_gattc_evt_t * const p_ble_ga
     int service_index;
     const ble_gattc_service_t * service;
 
-    printf("Received service discovery response\n");
-    fflush(stdout);
-
     if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS)
     {
         printf("Service discovery failed. Error code 0x%X\n", p_ble_gattc_evt->gatt_status);
@@ -822,6 +906,8 @@ static void on_service_discovery_response(const ble_gattc_evt_t * const p_ble_ga
     }
 
     count = p_ble_gattc_evt->params.prim_srvc_disc_rsp.count;
+	printf("Received service discovery response, service count:%d\n", count);
+	fflush(stdout);
 
     if (count == 0)
     {
@@ -830,30 +916,24 @@ static void on_service_discovery_response(const ble_gattc_evt_t * const p_ble_ga
         return;
     }
 
-    if (count > 1)
+    /*if (count > 1)
     {
         printf("Warning, discovered multiple primary services. Ignoring all but the first\n");
-    }
+    }*/
 
     service_index = 0; /* We expect to discover only the Heart Rate service as requested. */
-    service = &(p_ble_gattc_evt->params.prim_srvc_disc_rsp.services[service_index]);
+	service = &(p_ble_gattc_evt->params.prim_srvc_disc_rsp.services[service_index]);
 
-    if (service->uuid.uuid != BLE_UUID_GAP)
-    {
-        printf("Unknown service discovered with UUID: 0x%04X\n", service->uuid.uuid);
-        fflush(stdout);
-        return;
-    }
+	char uuid_string[STRING_BUFFER_SIZE] = { 0 };
+	get_uuid_string(service->uuid.uuid, uuid_string);
+	printf("Service discovered UUID: 0x%04X(%s), handle range:0x%04X - 0x%04X\n", service->uuid.uuid, uuid_string,
+		service->handle_range.start_handle, service->handle_range.end_handle);
+	fflush(stdout);
 
-    m_service_start_handle  = service->handle_range.start_handle;
-    m_service_end_handle    = service->handle_range.end_handle;
+	m_service_start_handle = service->handle_range.start_handle;
+	m_service_end_handle = service->handle_range.end_handle;
 
-    printf("Discovered %d service. UUID: 0x%04X, "
-                   "start handle: 0x%04X, end handle: 0x%04X\n",
-        count, service->uuid.uuid, m_service_start_handle, m_service_end_handle);
-    fflush(stdout);
-
-    char_discovery_start();
+	char_discovery_start(service->handle_range);
 }
 
 /**@brief Function called on BLE_GATTC_EVT_CHAR_DISC_RSP event.
@@ -877,23 +957,51 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
     printf(" Received characteristic discovery response, characteristics count: %d\n", count);
     fflush(stdout);
 
+	ble_gattc_handle_range_t handle_range = { 0 };
+
+	char uuid_string[STRING_BUFFER_SIZE] = { 0 };
     for (int i = 0; i < count; i++)
     {
-        printf(" Characteristic handle: 0x%04X, UUID: 0x%04X\n",
-				p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_decl,
-				p_ble_gattc_evt->params.char_disc_rsp.chars[i].uuid.uuid);
+		memset(uuid_string, 0, sizeof(uuid_string));
+		get_uuid_string(p_ble_gattc_evt->params.char_disc_rsp.chars[i].uuid.uuid, uuid_string);
+        printf(" Characteristic handle:0x%04X, UUID: 0x%04X(%s) prop(LSB):0x%x\n",
+				p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value,
+				p_ble_gattc_evt->params.char_disc_rsp.chars[i].uuid.uuid,
+				uuid_string,
+				p_ble_gattc_evt->params.char_disc_rsp.chars[i].char_props);
         fflush(stdout);
 
-        if (p_ble_gattc_evt->params.char_disc_rsp.chars[i].uuid.uuid ==
-            BLE_UUID_GAP_CHARACTERISTIC_DEVICE_NAME)
-        {
-			printf("DEBUG: GAP DEVICE NAME char found\n");
-			fflush(stdout);
-			m_hrm_char_handle = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_decl;
-        }
+		// arrange handle ranges for discover descriptor, or use service handle range for all service descriptors
+		if (handle_range.start_handle == 0 || 
+			handle_range.start_handle > p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value)
+			handle_range.start_handle = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value;
+		if (handle_range.end_handle == 0 ||
+			handle_range.end_handle < p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value)
+			handle_range.end_handle = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value;
+
+   //     if (p_ble_gattc_evt->params.char_disc_rsp.chars[i].uuid.uuid ==
+   //         BLE_UUID_GAP_CHARACTERISTIC_DEVICE_NAME)
+   //     {
+			//printf("DEBUG: GAP DEVICE NAME char found\n");
+			//fflush(stdout);
+			//m_hrm_char_handle = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_decl;
+
+			//uint32_t error_code = 0;
+
+			//uint16_t p_handle[2] = { 0 };
+			//p_handle[0] = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value;
+			//p_handle[1] = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value + 2;
+			//error_code = sd_ble_gattc_char_values_read(
+			//	m_adapter,
+			//	m_connection_handle,
+			//	p_handle, 2
+			//);
+			//printf(" get char by read %d\n", error_code);
+			////on_read_response failed with 0x106(BLE_GATT_STATUS_ATTERR_REQUEST_NOT_SUPPORTED) refer to BLE_GATT_STATUS_CODES
+   //     }
     }
 
-    descr_discovery_start();
+    descr_discovery_start(handle_range);
 }
 
 /**@brief Function called on BLE_GATTC_EVT_DESC_DISC_RSP event.
@@ -916,11 +1024,15 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
     printf(" Received descriptor discovery response, descriptor count: %d\n", count);
     fflush(stdout);
 
+	char uuid_string[STRING_BUFFER_SIZE] = { 0 };
     for (int i = 0; i < count; i++)
     {
-        printf(" Descriptor handle: 0x%04X, UUID: 0x%04X\n",
+		memset(uuid_string, 0, sizeof(uuid_string));
+		get_uuid_string(p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid, uuid_string);
+        printf(" Descriptor handle: 0x%04X, UUID: 0x%04X(%s)\n",
                p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle,
-               p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid);
+               p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid,
+			   uuid_string);
         fflush(stdout);
 
         if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid ==
@@ -931,27 +1043,19 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 			printf("DEBUG: GAP DEVICE NAME descr found, try to read\n");
 			fflush(stdout);
 
+			uint32_t error_code = 0;
+
 			ble_gattc_handle_range_t range[1];
 			range[0].start_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
 			range[0].end_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
-			uint32_t code = sd_ble_gattc_char_value_by_uuid_read(
+			error_code = sd_ble_gattc_char_value_by_uuid_read(
 				m_adapter,
 				m_connection_handle,
 				&(p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid),
 				range
 			);
-			printf(" get char by uuid %d\n", code);
+			printf(" get char by uuid %d\n", error_code);
 
-			uint16_t p_handle[3] = { 0 };
-			p_handle[0] = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle - 1;
-			p_handle[1] = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
-			p_handle[2] = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle + 1;
-			code = sd_ble_gattc_char_values_read(
-				m_adapter,
-				m_connection_handle,
-				p_handle, 3
-			);
-			printf(" get char by uuid %d\n", code);
         }
     }
 }
@@ -1035,14 +1139,45 @@ static void on_hvx(const ble_gattc_evt_t * const p_ble_gattc_evt)
  */
 static void on_conn_params_update_request(const ble_gap_evt_t * const p_ble_gap_evt)
 {
+	auto conn_params = p_ble_gap_evt->
+		params.conn_param_update_request.conn_params;
     uint32_t err_code = sd_ble_gap_conn_param_update(m_adapter, m_connection_handle,
-                                            &(p_ble_gap_evt->
-                                                    params.conn_param_update_request.conn_params));
-    if (err_code != NRF_SUCCESS)
+                                            &(conn_params));
+	printf("DEBUG: connection update request code=%d min=%d max=%d late=%d timeout=%d\n",
+		err_code,
+		(int)(conn_params.min_conn_interval * 1.25),
+		(int)(conn_params.max_conn_interval * 1.25),
+		conn_params.slave_latency,
+		(int)(conn_params.conn_sup_timeout / 100));
+    
+	if (err_code != NRF_SUCCESS)
     {
         printf("Conn params update failed, err_code %d\n", err_code);
         fflush(stdout);
     }
+}
+
+static void on_conn_params_update(const ble_gap_evt_t * const p_ble_gap_evt)
+{
+	// DEBUG: copied from nordic_uart_client example
+	printf("DEBUG: evt_conn_param_updat\n");
+	//ble_gap_conn_params_t * conn_params;
+
+	auto conn_params = &(p_ble_gap_evt->params.conn_param_update.conn_params);
+
+	printf("Connection parameters updated. New parameters:\n");
+	printf("Connection interval : %d [ms]\n", (int)(conn_params->min_conn_interval * 1.25));
+	printf("Slave latency : %d\n", conn_params->slave_latency);
+	printf("Supervision timeout : %d [s]\n", (int)(conn_params->conn_sup_timeout / 100));
+	fflush(stdout);
+
+	uint32_t error_code;
+	ble_gap_conn_sec_t conn_sec;
+	error_code = sd_ble_gap_conn_sec_get(m_adapter, m_connection_handle, &conn_sec);
+	printf("DEBUG: get security code=%d mode=%d level=%d\n", error_code, conn_sec.sec_mode.sm, conn_sec.sec_mode.lv);
+
+	//TODO: should wait before param updated event to auth secure param(or passkey) to bond?
+	service_discovery_start();
 }
 
 #if NRF_SD_BLE_API >= 3
@@ -1115,19 +1250,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
             m_connected_devices--;
             m_connection_handle = 0;
             break;
-		case BLE_GAP_EVT_CONN_PARAM_UPDATE:
-			// DEBUG: copied from nordic_uart_client example
-			printf("DEBUG: evt_conn_param_updat\n");
-			ble_gap_conn_params_t * conn_params;
 
-			conn_params = &p_ble_evt->evt.gap_evt.params.conn_param_update.conn_params;
-
-			printf("Connection parameters updated. New parameters:\n");
-			printf("Connection interval : %d [ms]\n", (int)(conn_params->min_conn_interval * 1.25));
-			printf("Slave latency : %d\n", conn_params->slave_latency);
-			printf("Supervision timeout : %d [s]\n", (int)(conn_params->conn_sup_timeout / 100));
-			fflush(stdout);
-			break;
         case BLE_GAP_EVT_ADV_REPORT:
             on_adv_report(&(p_ble_evt->evt.gap_evt));
             break;
@@ -1166,6 +1289,10 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
             on_conn_params_update_request(&(p_ble_evt->evt.gap_evt));
             break;
 
+		case BLE_GAP_EVT_CONN_PARAM_UPDATE:
+			on_conn_params_update(&(p_ble_evt->evt.gap_evt));
+			break;
+
     #if NRF_SD_BLE_API >= 3
         case BLE_GATTS_EVT_EXCHANGE_MTU_REQUEST:
             on_exchange_mtu_request(&(p_ble_evt->evt.gatts_evt));
@@ -1175,6 +1302,38 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
             on_exchange_mtu_response(&(p_ble_evt->evt.gattc_evt));
             break;
     #endif
+
+#if NRF_SD_BLE_API >= 5
+
+		case BLE_GATTC_EVT_WRITE_CMD_TX_COMPLETE:
+			break;
+
+		case BLE_GAP_EVT_DATA_LENGTH_UPDATE:
+			printf("Maximum radio packet length updated to %d bytes.\n",
+				p_ble_evt->evt.gap_evt.params.data_length_update.effective_params.max_tx_octets);
+			break;
+
+		case BLE_GAP_EVT_DATA_LENGTH_UPDATE_REQUEST:
+			sd_ble_gap_data_length_update(m_adapter, m_connection_handle, NULL, NULL);
+			break;
+
+		case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
+		{
+			printf("PHY update request.\n");
+			ble_gap_phys_t const phys =
+			{
+				BLE_GAP_PHY_AUTO, /*tx_phys*/
+				BLE_GAP_PHY_AUTO, /*rx_phys*/
+			};
+			uint32_t err_code = sd_ble_gap_phy_update(m_adapter, m_connection_handle, &phys);
+			if (err_code != NRF_SUCCESS)
+			{
+				printf("PHY update request reply failed, err_code %d\n", err_code);
+			}
+			fflush(stdout);
+		} break;
+
+#endif
 
         default:
             printf("Received an un-handled event with ID: %d\n", p_ble_evt->header.evt_id);
