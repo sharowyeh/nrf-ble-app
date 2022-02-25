@@ -103,8 +103,9 @@ enum
 #define BLE_UUID_BATTERY_SRV 0x180F
 #define BLE_UUID_HID_SRV 0x1812
 // characteristic, from SDK
-#define 	BLE_UUID_PROTOCOL_MODE_CHAR   0x2A4E
-#define 	BLE_UUID_REPORT_CHAR   0x2A4D
+#define BLE_UUID_BATTERY_LEVEL_CHAR   0x2A19
+#define BLE_UUID_PROTOCOL_MODE_CHAR   0x2A4E
+#define BLE_UUID_REPORT_CHAR   0x2A4D
 
 // force stop using example function
 //#define BLE_UUID_HEART_RATE_SERVICE          0x180D /**< Heart Rate service UUID. */
@@ -127,6 +128,8 @@ static uint8_t     m_connected_devices          = 0;
 static uint16_t    m_connection_handle          = 0;
 static uint16_t    m_service_start_handle       = 0;
 static uint16_t    m_service_end_handle         = 0;
+static uint16_t    m_device_name_handle         = 0;
+static uint16_t    m_battery_level_handle       = 0;
 static uint16_t    m_hrm_char_handle            = 0;
 static uint16_t    m_hrm_cccd_handle            = 0;
 static bool        m_connection_is_in_progress  = false;
@@ -177,6 +180,26 @@ static ble_gap_conn_params_t m_connection_param =
     (uint16_t)CONNECTION_SUPERVISION_TIMEOUT
 };
 
+static ble_gap_sec_params_t m_sec_params = 
+{
+	(uint8_t)1, /*bond*/
+	(uint8_t)0, /*mitm*/
+	(uint8_t)0, /*lesc*/
+	(uint8_t)0, /*keypress*/
+    (uint8_t)BLE_GAP_IO_CAPS_KEYBOARD_ONLY, /*io_caps*/
+	(uint8_t)0, /*oob*/
+	(uint8_t)7, /*min_key_size, header default from driver test_util_adapater_wrapper*/
+	(uint8_t)16, /*max_key_size, header default from driver test_util_adapater_wrapper*/
+	{ /*kdist_own, default from pc-nrfconnect-ble/lib/reducer/securityReducer.js*/
+		(uint8_t)1, /** < enc, Long Term Key and Master Identification. */
+		(uint8_t)0, /** < id, Identity Resolving Key and Identity Address Information. */
+		(uint8_t)0, /** < sign, Connection Signature Resolving Key. */
+		(uint8_t)0 /** < link, Derive the Link Key from the LTK. */
+	},
+	{ /*kdist_peer*/
+		1, 0, 0, 0
+	}
+};
 
 /** Global functions */
 
@@ -423,6 +446,10 @@ static bool get_uuid_string(uint16_t uuid, char *uuid_string) {
 		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "Device Name");
 		result = true;
 		break;
+	case BLE_UUID_BATTERY_LEVEL_CHAR:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "Battery Level");
+		result = true;
+		break;
 	case BLE_UUID_PROTOCOL_MODE_CHAR:
 		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "Protocol Mode");
 		result = true;
@@ -535,7 +562,7 @@ static uint32_t ble_cfg_set(uint8_t conn_cfg_tag)
 #endif
     ble_cfg.gap_cfg.role_count_cfg.periph_role_count    = 0;
     ble_cfg.gap_cfg.role_count_cfg.central_role_count   = 1;
-    ble_cfg.gap_cfg.role_count_cfg.central_sec_count    = 0;
+    ble_cfg.gap_cfg.role_count_cfg.central_sec_count    = 1; /*NOTICE: set for sd_ble_gap_authenticate*/
 
     error_code = sd_ble_cfg_set(m_adapter, BLE_GAP_CFG_ROLE_COUNT, &ble_cfg, ram_start);
     if (error_code != NRF_SUCCESS)
@@ -649,6 +676,23 @@ static uint32_t conn_start()
 	return err_code;
 }
 
+static uint32_t bond_start()
+{
+	uint32_t error_code;
+
+	//NOTICE: refer to driver, testcase_security.cpp
+
+	error_code = sd_ble_gap_authenticate(m_adapter, m_connection_handle, &m_sec_params);
+	// NOTICE: return NRF_ERROR_NOT_SUPPORTED or NRF_ERROR_NO_MEM?
+	//         driver test case uses for passkey auth, refer to testcase_security.cpp
+	if (error_code != NRF_SUCCESS) {
+	}
+	printf("DEBUG: auth code=%d\n", error_code);
+	fflush(stdout);
+
+	return error_code;
+}
+
 // attempt to discovery multiple service uuids
 std::vector<ble_uuid_t> srvc_uuids;
 
@@ -691,7 +735,7 @@ static uint32_t service_discovery_start()
 	srvc_uuids.push_back(ble_uuid_t{ (uint16_t)BLE_UUID_BATTERY_SRV, (uint8_t)BLE_UUID_TYPE_BLE });
 	srvc_uuids.push_back(ble_uuid_t{ (uint16_t)BLE_UUID_HID_SRV, (uint8_t)BLE_UUID_TYPE_BLE });
 
-	return service_discovery_start(BLE_UUID_HID_SRV, BLE_UUID_TYPE_BLE);
+	return service_discovery_start(BLE_UUID_BATTERY_SRV, BLE_UUID_TYPE_BLE);
 }
 
 /**@brief Function called upon discovering a BLE peripheral's primary service(s).
@@ -794,24 +838,8 @@ static void on_connected(const ble_gap_evt_t * const p_ble_gap_evt)
 	error_code = sd_ble_gap_conn_sec_get(m_adapter, m_connection_handle, &conn_sec);
 	printf("DEBUG: get security code=%d mode=%d level=%d\n", error_code, conn_sec.sec_mode.sm, conn_sec.sec_mode.lv);
 
-	//NOTICE: refer to driver, testcase_security.cpp
-	ble_gap_sec_params_t sec_params;
-	sec_params.bond = 1;
-	sec_params.keypress = 0;
-	sec_params.io_caps = BLE_GAP_IO_CAPS_NONE;
-	sec_params.oob = 0;
-	sec_params.min_key_size = 7; /*header default from driver test_util_adapater_wrapper*/
-	sec_params.max_key_size = 16; /*header default from driver test_util_adapater_wrapper*/
-
-	error_code = sd_ble_gap_authenticate(m_adapter, m_connection_handle, &sec_params);
-	// NOTICE: return NRF_ERROR_NOT_SUPPORTED, for the debug device may not use legacy passkey
-	//         driver test case uses for passkey auth, refer to testcase_security.cpp
-	if (error_code != NRF_SUCCESS) {
-	}
-	printf("DEBUG: auth code=%d\n", error_code);
-	fflush(stdout);
-
 	//TODO: should wait before param updated event or bond for auth secure param(or passkey)
+	bond_start();
 	//service_discovery_start();
 }
 
@@ -976,34 +1004,22 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
 				p_ble_gattc_evt->params.char_disc_rsp.chars[i].char_props);
         fflush(stdout);
 
-		// arrange handle ranges for discover descriptor, or use service handle range for all service descriptors
-		if (handle_range.start_handle == 0 || 
-			handle_range.start_handle > p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value)
-			handle_range.start_handle = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value;
-		if (handle_range.end_handle == 0 ||
-			handle_range.end_handle < p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value)
-			handle_range.end_handle = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value;
+		// NOTICE: need reinvoke descr_discovery_start after gettc_read
+        /*if (p_ble_gattc_evt->params.char_disc_rsp.chars[i].uuid.uuid ==
+            BLE_UUID_GAP_CHARACTERISTIC_DEVICE_NAME)
+        {
+			m_hrm_char_handle = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_decl;
 
-   //     if (p_ble_gattc_evt->params.char_disc_rsp.chars[i].uuid.uuid ==
-   //         BLE_UUID_GAP_CHARACTERISTIC_DEVICE_NAME)
-   //     {
-			//printf("DEBUG: GAP DEVICE NAME char found\n");
-			//fflush(stdout);
-			//m_hrm_char_handle = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_decl;
+			uint32_t error_code = 0;
 
-			//uint32_t error_code = 0;
-
-			//uint16_t p_handle[2] = { 0 };
-			//p_handle[0] = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value;
-			//p_handle[1] = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value + 2;
-			//error_code = sd_ble_gattc_char_values_read(
-			//	m_adapter,
-			//	m_connection_handle,
-			//	p_handle, 2
-			//);
-			//printf(" get char by read %d\n", error_code);
-			////on_read_response failed with 0x106(BLE_GATT_STATUS_ATTERR_REQUEST_NOT_SUPPORTED) refer to BLE_GATT_STATUS_CODES
-   //     }
+			uint16_t value_handle = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value;
+			error_code = sd_ble_gattc_read(
+				m_adapter,
+				m_connection_handle,
+				value_handle, 0
+			);
+			printf(" Read value from handle:0x%04X code:%d\n", value_handle, error_code);
+        }*/
     }
 
     descr_discovery_start(handle_range);
@@ -1040,33 +1056,30 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 			   uuid_string);
         fflush(stdout);
 
-		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid ==
-			BLE_UUID_DESCRIPTOR_CLIENT_CHAR_CONFIG)
+		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_CCCD)
 		{
-			// TODO: check the notification bit, then set CCCD handle for HVX
-			uint32_t error_code = 0;
 
-			ble_gattc_handle_range_t range[1];
-			range[0].start_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
-			range[0].end_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
-			error_code = sd_ble_gattc_char_value_by_uuid_read(
-				m_adapter,
-				m_connection_handle,
-				&(p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid),
-				range
-			);
-			printf(" DEBUG read char from uuid:0x%04X handle:0x%04X %d\n",
-				p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid,
-				p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle,
-				error_code);
 		}
 
-        if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid ==
-			BLE_UUID_GAP_CHARACTERISTIC_DEVICE_NAME)
+		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_BATTERY_LEVEL_CHAR)
+		{
+			//BLE_GATT_STATUS_ATTERR_INSUF_AUTHENTICATION
+			m_battery_level_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
+			printf("DEBUG: Battery level handle saved\n");
+			fflush(stdout);
+		}
+
+        if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_GAP_CHARACTERISTIC_DEVICE_NAME)
         {
+			m_device_name_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
+			printf("DEBUG: Device name handle saved\n");
+			fflush(stdout);
+
             //m_hrm_cccd_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
             //printf("Press enter to toggle notifications on the HRM characteristic\n");
-			printf("DEBUG: GAP DEVICE NAME descr found, try to read\n");
+
+			// for study usage
+			/*printf("DEBUG: Try to read char by UUID 0x%04X.\n", p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid);
 			fflush(stdout);
 
 			uint32_t error_code = 0;
@@ -1080,28 +1093,130 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 				&(p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid),
 				range
 			);
-			printf(" DEBUG read char from uuid:0x%04X handle:0x%04X code:%d\n",
+			printf(" DEBUG read char by uuid:0x%04X handle:0x%04X code:%d\n",
 				p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid,
 				p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle,
 				error_code);
+			fflush(stdout);*/
 
         }
     }
+
+	//DEBUG: do something after descriptor discovered
+	uint16_t value_handle = m_battery_level_handle;
+	if (value_handle == 0)
+		return;
+	uint32_t error_code = 0;
+	error_code = sd_ble_gattc_read(
+		m_adapter,
+		m_connection_handle,
+		value_handle, 0
+	);
+	printf(" Read value from handle:0x%04X code:%d\n", value_handle, error_code);
+}
+
+static void on_read_characteristic_value_by_uuid_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
+{
+	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS)
+	{
+		printf("Error read char val by uuid operation, error code 0x%x\n", p_ble_gattc_evt->gatt_status);
+		fflush(stdout);
+		return;
+	}
+
+	if (p_ble_gattc_evt->params.char_val_by_uuid_read_rsp.count == 0 ||
+		p_ble_gattc_evt->params.char_val_by_uuid_read_rsp.value_len == 0)
+	{
+		printf("Error read char val by uuid operation, no handle count or value length\n");
+		fflush(stdout);
+		return;
+	}
+
+	for (int i = 0; i < p_ble_gattc_evt->params.char_val_by_uuid_read_rsp.count; i++)
+	{
+		printf("Received read char value handle:0x%04X len:%d.\n",
+			p_ble_gattc_evt->params.char_val_by_uuid_read_rsp.handle_value[i],
+			p_ble_gattc_evt->params.char_val_by_uuid_read_rsp.value_len);
+		fflush(stdout);
+	}
+
+	//TODO: how to further usage from value_handle and value_len in char_val_by_uuid_read_rsp
+
+	printf("Received value len:%d read len:%d char len:%d hvx len:%d\n",
+		p_ble_gattc_evt->params.char_val_by_uuid_read_rsp.value_len,
+		p_ble_gattc_evt->params.read_rsp.len,
+		p_ble_gattc_evt->params.char_vals_read_rsp.len,
+		p_ble_gattc_evt->params.hvx.len);
+	fflush(stdout);
+
+	if (p_ble_gattc_evt->params.read_rsp.len == 0 &&
+		p_ble_gattc_evt->params.char_vals_read_rsp.len == 0 &&
+		p_ble_gattc_evt->params.hvx.len == 0)
+	{
+		printf("No data read\n");
+		fflush(stdout);
+		return;
+	}
+}
+
+static void on_read_characteristic_values_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
+{
+	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS)
+	{
+		printf("Error read char vals operation, error code 0x%x\n", p_ble_gattc_evt->gatt_status);
+		fflush(stdout);
+		return;
+	}
+
+	if (p_ble_gattc_evt->params.char_vals_read_rsp.len == 0)
+	{
+		printf("Error read char vals operation, no att values length\n");
+		fflush(stdout);
+		return;
+	}
+
+	//TODO: how to further usage from values and len in char_vals_read_rsp
+
+	printf("Received value len:%d read len:%d char len:%d hvx len:%d\n",
+		p_ble_gattc_evt->params.char_val_by_uuid_read_rsp.value_len,
+		p_ble_gattc_evt->params.read_rsp.len,
+		p_ble_gattc_evt->params.char_vals_read_rsp.len,
+		p_ble_gattc_evt->params.hvx.len);
+	fflush(stdout);
+
+	if (p_ble_gattc_evt->params.read_rsp.len == 0 &&
+		p_ble_gattc_evt->params.char_vals_read_rsp.len == 0 &&
+		p_ble_gattc_evt->params.hvx.len == 0)
+	{
+		printf("No data read\n");
+		fflush(stdout);
+		return;
+	}
 }
 
 static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 {
-	printf("Received read response from %d.\n", p_ble_gattc_evt->params.read_rsp.handle);
+	printf("Received read response from handle:0x%04X.\n",
+		p_ble_gattc_evt->params.read_rsp.handle);
 	fflush(stdout);
 
 	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS)
 	{
+		// refer to BLE_GATT_STATUS_ATTERR_INSUF_AUTHENTICATION if handle access required authentication
+		// refer to BLE_GATT_STATUS_ATTERR_REQUEST_NOT_SUPPORTED if handle property not permitted
 		printf("Error read operation, error code 0x%x\n", p_ble_gattc_evt->gatt_status);
 		fflush(stdout);
 		return;
 	}
 
+	printf("Received read len:%d, char len:%d hvx len:%d\n",
+		p_ble_gattc_evt->params.read_rsp.len,
+		p_ble_gattc_evt->params.char_vals_read_rsp.len,
+		p_ble_gattc_evt->params.hvx.len);
+	fflush(stdout);
+
 	if (p_ble_gattc_evt->params.read_rsp.len == 0 &&
+		p_ble_gattc_evt->params.char_vals_read_rsp.len == 0 &&
 		p_ble_gattc_evt->params.hvx.len == 0)
 	{
 		printf("No data read\n");
@@ -1114,9 +1229,8 @@ static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 	uint16_t len = p_ble_gattc_evt->params.read_rsp.len;
 
 	char read_str[128] = { 0 };
-	memcpy_s(&read_str[0], offset, p_data, offset);
-	//sprintf_s(read_str, len + 1, "%s", (char *)handle);
-	printf("DEBUG: read0:0x%x,%d char:%s\n", *p_data, offset, read_str);
+	memcpy_s(&read_str[0], len, p_data + offset, len);
+	printf("DEBUG: read0:0x%x,%d,%d char:%s\n", *p_data, offset, len, read_str);
 	fflush(stdout);
 }
 
@@ -1280,6 +1394,23 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
             m_connection_handle = 0;
             break;
 
+		case BLE_GAP_EVT_CONN_PARAM_UPDATE_REQUEST:
+			on_conn_params_update_request(&(p_ble_evt->evt.gap_evt));
+			break;
+
+		case BLE_GAP_EVT_CONN_PARAM_UPDATE:
+			on_conn_params_update(&(p_ble_evt->evt.gap_evt));
+			break;
+
+		case BLE_GAP_EVT_SEC_PARAMS_REQUEST:
+		{
+			ble_gap_sec_keyset_t sec_keyset = { 0 };
+			//TODO: NRF_ERROR_INVALID_PARAM
+			uint32_t error_code = sd_ble_gap_sec_params_reply(
+				m_adapter, m_connection_handle, BLE_GAP_SEC_STATUS_SUCCESS, &m_sec_params, &sec_keyset);
+			printf("DEBUG: on sec params request, reply %d\n", error_code);
+		}break;
+
         case BLE_GAP_EVT_ADV_REPORT:
             on_adv_report(&(p_ble_evt->evt.gap_evt));
             break;
@@ -1301,9 +1432,13 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
             break;
 
 		case BLE_GATTC_EVT_CHAR_VAL_BY_UUID_READ_RSP:
+			on_read_characteristic_value_by_uuid_response(&(p_ble_evt->evt.gattc_evt));
+			break;
 		case BLE_GATTC_EVT_READ_RSP:
-		case BLE_GATTC_EVT_CHAR_VALS_READ_RSP:
 			on_read_response(&(p_ble_evt->evt.gattc_evt));
+			break;
+		case BLE_GATTC_EVT_CHAR_VALS_READ_RSP:
+			on_read_characteristic_values_response(&(p_ble_evt->evt.gattc_evt));
 			break;
 
         case BLE_GATTC_EVT_WRITE_RSP:
@@ -1313,14 +1448,6 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
         case BLE_GATTC_EVT_HVX:
             on_hvx(&(p_ble_evt->evt.gattc_evt));
             break;
-
-        case BLE_GAP_EVT_CONN_PARAM_UPDATE_REQUEST:
-            on_conn_params_update_request(&(p_ble_evt->evt.gap_evt));
-            break;
-
-		case BLE_GAP_EVT_CONN_PARAM_UPDATE:
-			on_conn_params_update(&(p_ble_evt->evt.gap_evt));
-			break;
 
     #if NRF_SD_BLE_API >= 3
         case BLE_GATTS_EVT_EXCHANGE_MTU_REQUEST:
