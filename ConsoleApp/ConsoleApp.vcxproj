@@ -158,6 +158,19 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="security.cpp" />
+    <ClCompile Include="uECC\uECC.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="uECC\asm_arm.inc" />
+    <None Include="uECC\curve-specific.inc" />
+    <None Include="uECC\platform-specific.inc" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="security.h" />
+    <ClInclude Include="uECC\types.h" />
+    <ClInclude Include="uECC\uECC.h" />
+    <ClInclude Include="uECC\uECC_vli.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

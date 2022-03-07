@@ -57,6 +57,7 @@
 /** Includes */
 #include "ble.h"
 #include "sd_rpc.h"
+#include "security.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -200,6 +201,11 @@ static ble_gap_sec_params_t m_sec_params =
 		1, 0, 0, 0
 	}
 };
+
+// key pair for security params update, refer to security.h/cpp, duplicated from pc-ble-driver-js\src\driver_uecc.cpp
+static uint8_t m_private_key[ECC_P256_SK_LEN] = { 0 };
+static uint8_t m_public_key[ECC_P256_PK_LEN] = { 0 };
+
 
 /** Global functions */
 
@@ -649,7 +655,7 @@ static uint32_t conn_start()
 	m_connection_param.max_conn_interval = MAX_CONNECTION_INTERVAL;
 	m_connection_param.slave_latency = 10;
 	m_connection_param.conn_sup_timeout = CONNECTION_SUPERVISION_TIMEOUT;
-	printf("DEBUG: given conn params for conn start min=%d max=%d late=%d timeout=%d",
+	printf("DEBUG: conn start, conn params min=%d max=%d late=%d timeout=%d\n",
 		(int)(m_connection_param.min_conn_interval * 1.25),
 		(int)(m_connection_param.max_conn_interval * 1.25),
 		m_connection_param.slave_latency,
@@ -680,14 +686,17 @@ static uint32_t bond_start()
 {
 	uint32_t error_code;
 
-	//NOTICE: refer to driver, testcase_security.cpp
+	// try to get security mode before authenticate
+	ble_gap_conn_sec_t conn_sec;
+	error_code = sd_ble_gap_conn_sec_get(m_adapter, m_connection_handle, &conn_sec);
+	printf("DEBUG: get security, return=%d mode=%d level=%d\n", error_code, conn_sec.sec_mode.sm, conn_sec.sec_mode.lv);
+	fflush(stdout);
 
+	// NOTICE: refer to driver, testcase_security.cpp, we'll use the default security params
 	error_code = sd_ble_gap_authenticate(m_adapter, m_connection_handle, &m_sec_params);
-	// NOTICE: return NRF_ERROR_NOT_SUPPORTED or NRF_ERROR_NO_MEM?
+	// NOTICE: for other devices, check if return NRF_ERROR_NOT_SUPPORTED or NRF_ERROR_NO_MEM?
 	//         driver test case uses for passkey auth, refer to testcase_security.cpp
-	if (error_code != NRF_SUCCESS) {
-	}
-	printf("DEBUG: auth code=%d\n", error_code);
+	printf("DEBUG: authenticate return=%d should be %d\n", error_code, NRF_SUCCESS);
 	fflush(stdout);
 
 	return error_code;
@@ -708,7 +717,7 @@ static uint32_t service_discovery_start(uint16_t uuid, uint8_t type)
     uint16_t   start_handle = 0x01;
     ble_uuid_t srvc_uuid;
 
-    printf("Discovering primary service:%0x04X\n", uuid);
+    printf("Discovering primary service:0x%04X\n", uuid);
     fflush(stdout);
 
 	srvc_uuid.type = type;
@@ -735,7 +744,7 @@ static uint32_t service_discovery_start()
 	srvc_uuids.push_back(ble_uuid_t{ (uint16_t)BLE_UUID_BATTERY_SRV, (uint8_t)BLE_UUID_TYPE_BLE });
 	srvc_uuids.push_back(ble_uuid_t{ (uint16_t)BLE_UUID_HID_SRV, (uint8_t)BLE_UUID_TYPE_BLE });
 
-	return service_discovery_start(BLE_UUID_BATTERY_SRV, BLE_UUID_TYPE_BLE);
+	return service_discovery_start(BLE_UUID_HID_SRV, BLE_UUID_TYPE_BLE);
 }
 
 /**@brief Function called upon discovering a BLE peripheral's primary service(s).
@@ -746,8 +755,7 @@ static uint32_t service_discovery_start()
  */
 static uint32_t char_discovery_start(ble_gattc_handle_range_t handle_range)
 {
-	if (handle_range.start_handle == 0 &&
-		handle_range.end_handle == handle_range.start_handle) {
+	if (handle_range.start_handle == 0 && handle_range.end_handle == 0) {
 		handle_range.start_handle = m_service_start_handle;
 		handle_range.end_handle = m_service_end_handle;
 	}
@@ -767,8 +775,7 @@ static uint32_t char_discovery_start(ble_gattc_handle_range_t handle_range)
  */
 static uint32_t descr_discovery_start(ble_gattc_handle_range_t handle_range)
 {
-	if (handle_range.start_handle == 0 &&
-		handle_range.end_handle == handle_range.start_handle) {
+	if (handle_range.start_handle == 0 && handle_range.end_handle == 0) {
 		handle_range.start_handle = m_service_start_handle;
 		handle_range.end_handle = m_service_end_handle;
 	}
@@ -796,8 +803,14 @@ static uint32_t hrm_cccd_set(uint8_t value)
     ble_gattc_write_params_t write_params;
     uint8_t                  cccd_value[2] = {value, 0};
 
-    printf("Setting HRM CCCD\n");
+    printf("Setting handle CCCD\n");
     fflush(stdout);
+
+	if (m_battery_level_handle > 0) {
+		m_hrm_cccd_handle = m_battery_level_handle;
+		printf("DEBUG: set CCCD 0x%04X value:0x%02X-0x%02X\n", m_battery_level_handle, cccd_value[0], cccd_value[1]);
+		//DEBUG: will get 0x103 error
+	}
 
     if (m_hrm_cccd_handle == 0)
     {
@@ -832,11 +845,6 @@ static void on_connected(const ble_gap_evt_t * const p_ble_gap_evt)
     m_connected_devices++;
     m_connection_handle         = p_ble_gap_evt->conn_handle;
     m_connection_is_in_progress = false;
-
-	uint32_t error_code;
-	ble_gap_conn_sec_t conn_sec;
-	error_code = sd_ble_gap_conn_sec_get(m_adapter, m_connection_handle, &conn_sec);
-	printf("DEBUG: get security code=%d mode=%d level=%d\n", error_code, conn_sec.sec_mode.sm, conn_sec.sec_mode.lv);
 
 	//TODO: should wait before param updated event or bond for auth secure param(or passkey)
 	bond_start();
@@ -1045,6 +1053,9 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
     printf(" Received descriptor discovery response, descriptor count: %d\n", count);
     fflush(stdout);
 
+	//TODO: handle for next iteration
+	ble_gattc_handle_range_t handle_range = { 0 };
+
 	char uuid_string[STRING_BUFFER_SIZE] = { 0 };
     for (int i = 0; i < count; i++)
     {
@@ -1056,16 +1067,24 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 			   uuid_string);
         fflush(stdout);
 
+		//TODO: handle for next iteration
+		if (m_service_start_handle <= p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle)
+			m_service_start_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle + 1;
+
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_CCCD)
 		{
-
+			if (m_hrm_cccd_handle == 0) {
+				m_hrm_cccd_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
+				printf("DEBUG: CCCD handle saved, handle=%x\n", m_hrm_cccd_handle);
+				fflush(stdout);
+			}
 		}
 
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_BATTERY_LEVEL_CHAR)
 		{
 			//BLE_GATT_STATUS_ATTERR_INSUF_AUTHENTICATION
 			m_battery_level_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
-			printf("DEBUG: Battery level handle saved\n");
+			printf("DEBUG: Battery level handle saved, handle=%x\n", m_battery_level_handle);
 			fflush(stdout);
 		}
 
@@ -1102,17 +1121,9 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
         }
     }
 
-	//DEBUG: do something after descriptor discovered
-	uint16_t value_handle = m_battery_level_handle;
-	if (value_handle == 0)
-		return;
-	uint32_t error_code = 0;
-	error_code = sd_ble_gattc_read(
-		m_adapter,
-		m_connection_handle,
-		value_handle, 0
-	);
-	printf(" Read value from handle:0x%04X code:%d\n", value_handle, error_code);
+	if (m_service_start_handle < m_service_end_handle) {
+		descr_discovery_start(handle_range);
+	}
 }
 
 static void on_read_characteristic_value_by_uuid_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
@@ -1363,6 +1374,14 @@ static void on_exchange_mtu_response(const ble_gattc_evt_t * const p_ble_gattc_e
 }
 #endif
 
+static ble_gap_enc_key_t m_own_enc = { 0 };
+static ble_gap_id_key_t m_own_id = { 0 };
+static ble_gap_sign_info_t m_own_sign = { 0 };
+static ble_gap_lesc_p256_pk_t m_own_pk = { 0 };
+static ble_gap_enc_key_t m_peer_enc = { 0 };
+static ble_gap_id_key_t m_peer_id = { 0 };
+static ble_gap_sign_info_t m_peer_sign = { 0 };
+static ble_gap_lesc_p256_pk_t m_peer_pk = { 0 };
 
 /** Event dispatcher */
 
@@ -1404,12 +1423,46 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 
 		case BLE_GAP_EVT_SEC_PARAMS_REQUEST:
 		{
+			printf("DEBUG: on security params request, peer: bond=%d io=%d min=%d max=%d ownenc=%d peerenc=%d\n",
+				p_ble_evt->evt.gap_evt.params.sec_params_request.peer_params.bond,
+				p_ble_evt->evt.gap_evt.params.sec_params_request.peer_params.io_caps,
+				p_ble_evt->evt.gap_evt.params.sec_params_request.peer_params.min_key_size,
+				p_ble_evt->evt.gap_evt.params.sec_params_request.peer_params.max_key_size,
+				p_ble_evt->evt.gap_evt.params.sec_params_request.peer_params.kdist_own.enc,
+				p_ble_evt->evt.gap_evt.params.sec_params_request.peer_params.kdist_peer.enc);
+			
+			memcpy_s(m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, m_public_key, ECC_P256_PK_LEN);
+
 			ble_gap_sec_keyset_t sec_keyset = { 0 };
-			//TODO: NRF_ERROR_INVALID_PARAM
+			sec_keyset.keys_own.p_enc_key = &m_own_enc;
+			sec_keyset.keys_own.p_id_key = &m_own_id;
+			sec_keyset.keys_own.p_sign_key = &m_own_sign;
+			sec_keyset.keys_own.p_pk = &m_own_pk;
+			sec_keyset.keys_peer.p_enc_key = &m_peer_enc;
+			sec_keyset.keys_peer.p_id_key = &m_peer_id;
+			sec_keyset.keys_peer.p_sign_key = &m_peer_sign;
+			sec_keyset.keys_peer.p_pk = &m_peer_pk;
+			// NOTICE: to the peripheral role, given security_param as null, generate public key to keyset
 			uint32_t error_code = sd_ble_gap_sec_params_reply(
-				m_adapter, m_connection_handle, BLE_GAP_SEC_STATUS_SUCCESS, &m_sec_params, &sec_keyset);
-			printf("DEBUG: on sec params request, reply %d\n", error_code);
+				m_adapter, m_connection_handle, BLE_GAP_SEC_STATUS_SUCCESS, 0, &sec_keyset);
+			printf("DEBUG: on security params request, return=%d should be %d\n", error_code, NRF_SUCCESS);
+			fflush(stdout);
 		}break;
+
+		case BLE_GAP_EVT_CONN_SEC_UPDATE:
+			printf("DEBUG: on conn security updated, mode=%d level=%d\n",
+				p_ble_evt->evt.gap_evt.params.conn_sec_update.conn_sec.sec_mode.sm,
+				p_ble_evt->evt.gap_evt.params.conn_sec_update.conn_sec.sec_mode.lv);
+			fflush(stdout);
+			break;
+
+		case BLE_GAP_EVT_AUTH_STATUS:
+			printf("DEBUG: on auth status, status=%d, bond=%d\n",
+				p_ble_evt->evt.gap_evt.params.auth_status.auth_status,
+				p_ble_evt->evt.gap_evt.params.auth_status.bonded);
+			fflush(stdout);
+			//TODO: after auth ok, discover service?
+			break;
 
         case BLE_GAP_EVT_ADV_REPORT:
             on_adv_report(&(p_ble_evt->evt.gap_evt));
@@ -1508,6 +1561,13 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
  */
 int main(int argc, char * argv[])
 {
+	// init ecc and generate keypair for later usage?
+	ecc_init();
+	ecc_p256_gen_keypair(m_private_key, m_public_key);
+	uint8_t test_pubkey[ECC_P256_PK_LEN] = { 0 };
+	ecc_p256_compute_pubkey(m_private_key, test_pubkey);
+	// ASSERT: test_pubkey should be the same with m_public_key
+
     uint32_t error_code;
     char     serial_port[10] = DEFAULT_UART_PORT_NAME;
     uint32_t baud_rate = DEFAULT_BAUD_RATE;
