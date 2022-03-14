@@ -37,7 +37,7 @@
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v141</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-    <CharacterSet>Unicode</CharacterSet>
+    <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
@@ -50,7 +50,7 @@
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v141</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-    <CharacterSet>Unicode</CharacterSet>
+    <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -91,12 +91,12 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;NRF_SD_BLE_API=5;PC_BLE_DRIVER_STATIC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\Users\sharow\projects\nordic\pc-ble-driver\include\sd_api_v5;C:\Users\sharow\projects\nordic\pc-ble-driver\include\common;C:\Users\sharow\projects\nordic\pc-ble-driver\include\common\config;C:\Users\sharow\projects\nordic\pc-ble-driver\include\common\sdk_compat;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)..\pc-ble-driver\include\sd_api_v5;$(SolutionDir)..\pc-ble-driver\include\common;$(SolutionDir)..\pc-ble-driver\include\common\config;$(SolutionDir)..\pc-ble-driver\include\common\sdk_compat;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>C:\Users\sharow\projects\nordic\pc-ble-driver\build\Debug;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)..\pc-ble-driver\build\Debug;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>nrf-ble-driver-sd_api_v5-mt-static-gd-0_0_0.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
@@ -157,6 +157,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="dongle.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="security.cpp" />
     <ClCompile Include="uECC\uECC.c" />
@@ -167,6 +168,7 @@
     <None Include="uECC\platform-specific.inc" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="dongle.h" />
     <ClInclude Include="security.h" />
     <ClInclude Include="uECC\types.h" />
     <ClInclude Include="uECC\uECC.h" />

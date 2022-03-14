@@ -27,6 +27,9 @@
     <ClCompile Include="security.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="dongle.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="uECC\asm_arm.inc">
@@ -50,6 +53,9 @@
       <Filter>uECC</Filter>
     </ClInclude>
     <ClInclude Include="security.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="dongle.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
