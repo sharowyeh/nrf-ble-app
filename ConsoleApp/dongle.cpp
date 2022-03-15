@@ -30,19 +30,21 @@ enum
 // service
 #define BLE_UUID_BATTERY_SRV 0x180F
 #define BLE_UUID_HID_SRV 0x1812
-// characteristic, from SDK
+// characteristic, refer to SDK https://infocenter.nordicsemi.com/index.jsp?topic=%2Fcom.nordic.infocenter.s132.api.v2.0.0%2Fgroup__ble__types.html
 #define BLE_UUID_BATTERY_LEVEL_CHAR   0x2A19
 #define BLE_UUID_PROTOCOL_MODE_CHAR   0x2A4E
 #define BLE_UUID_REPORT_CHAR   0x2A4D
 #define BLE_UUID_REPORT_REF_DESCR 0x2908
 
-// force stop using example function
-//#define BLE_UUID_HEART_RATE_SERVICE          0x180D /**< Heart Rate service UUID. */
-//#define BLE_UUID_HEART_RATE_MEASUREMENT_CHAR 0x2A37 /**< Heart Rate Measurement characteristic UUID. */
 #define BLE_UUID_CCCD                        0x2902
 #define BLE_CCCD_NOTIFY                      0x01
 
+// refer to SDK https://infocenter.nordicsemi.com/index.jsp?topic=%2Fcom.nordic.infocenter.s132.api.v2.0.0%2Fgroup___b_l_e___h_c_i___s_t_a_t_u_s___c_o_d_e_s.html
+#define BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION 0x13
+#define BLE_HCI_LOCAL_HOST_TERMINATED_CONNECTION 0x16
+
 #define STRING_BUFFER_SIZE 50
+#define DATA_BUFFER_SIZE 256
 
 typedef struct
 {
@@ -52,8 +54,10 @@ typedef struct
 
 
 /** Global variables */
-//static ble_gap_evt_adv_report_t m_discovered_report = { 0 }; // replaced by selected_device or checked addr list
-static uint8_t     m_connected_devices = 0;
+static ble_gap_addr_t m_peer_addr = { 0 }; /* intent or connected peripheral address */
+static bool        m_is_connected = false; /* m_peer_addr has been connected(BLE_GAP_EVT_DISCONNECTED) */
+static bool	       m_is_authenticated = false; /* m_peer_addr has been authenticated(BLE_GAP_EVT_AUTH_STATUS) */
+static uint8_t     m_connected_devices = 0; /* number of connected devices */
 static uint16_t    m_connection_handle = 0;
 static uint16_t    m_service_start_handle = 0;
 static uint16_t    m_service_end_handle = 0;
@@ -61,17 +65,26 @@ static uint16_t    m_device_name_handle = 0;
 static uint16_t    m_battery_level_handle = 0;
 static bool        m_connection_is_in_progress = false;
 static adapter_t * m_adapter = NULL;
-static fn_on_discovered m_on_discovered = NULL;
-static fn_on_connected m_on_connected = NULL;
-static fn_on_authenticated m_on_authenticated = NULL;
+static fn_on_discovered      m_on_discovered = NULL;
+static fn_on_connected       m_on_connected = NULL;
+static fn_on_authenticated   m_on_authenticated = NULL;
 static fn_on_srvc_discovered m_on_srvc_discovered = NULL;
+static fn_on_disconnected    m_on_disconnected = NULL;
 
-/* Discovered addresses */
-std::map<std::string, ble_gap_evt_adv_report_t> m_discover_list; /*addr, report*/
+/* Advertising addresses */
+std::map<std::string, ble_gap_evt_adv_report_t> m_adv_list; /*addr, report*/
+
+typedef struct {
+	uint16_t handle = 0;
+	uint16_t uuid = 0;
+	unsigned char report_ref[32] = { 0 };
+	bool ref_read = false;
+	bool cccd_enabled = false;
+} dev_desc;
 
 /* Discovered handles */
 static std::vector<ble_gattc_char_t> m_chars_list;
-static std::vector<ble_gattc_desc_t> m_descs_list;
+static std::map<uint16_t, dev_desc> m_descs_list; /*handle, dev_desc*/
 
 
 #if NRF_SD_BLE_API >= 5
@@ -305,6 +318,15 @@ static bool get_adv_name(const ble_gap_evt_adv_report_t *p_adv_report, char * na
 	return false;
 }
 
+static void print_byte_string(char *byte_array, uint32_t len) {
+	if (byte_array == NULL)
+		return;
+	for (int i = 0; i < len; i++) {
+		printf("%02x ", (unsigned char)byte_array[i]);
+	}
+	fflush(stdout);
+}
+
 static bool get_uuid_string(uint16_t uuid, char *uuid_string) {
 	if (uuid_string == NULL) {
 		return false;
@@ -314,27 +336,47 @@ static bool get_uuid_string(uint16_t uuid, char *uuid_string) {
 		// service uuids
 	case BLE_UUID_GAP:
 		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "GAP");
+		result = true;
 		break;
 	case BLE_UUID_GATT:
 		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "GATT");
+		result = true;
 		break;
 	case BLE_UUID_BATTERY_SRV:
 		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "BATTERY");
+		result = true;
 		break;
 	case BLE_UUID_HID_SRV:
 		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "HID");
+		result = true;
+		break;
+	case BLE_UUID_SERVICE_PRIMARY:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "ServicePrimary");
+		result = true;
+		break;
+	case BLE_UUID_CHARACTERISTIC:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "Characteristic");
+		result = true;
 		break;
 		// characteristic uuids
 	case BLE_UUID_GAP_CHARACTERISTIC_DEVICE_NAME:
-		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "Device Name");
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "DeviceName");
+		result = true;
+		break;
+	case BLE_UUID_GAP_CHARACTERISTIC_APPEARANCE:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "Appearance");
+		result = true;
+		break;
+	case BLE_UUID_GAP_CHARACTERISTIC_PPCP:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "PreferConnParam");
 		result = true;
 		break;
 	case BLE_UUID_BATTERY_LEVEL_CHAR:
-		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "Battery Level");
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "BatteryLevel");
 		result = true;
 		break;
 	case BLE_UUID_PROTOCOL_MODE_CHAR:
-		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "Protocol Mode");
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "ProtocolMode");
 		result = true;
 		break;
 	case BLE_UUID_REPORT_CHAR:
@@ -351,11 +393,24 @@ static bool get_uuid_string(uint16_t uuid, char *uuid_string) {
 		result = true;
 		break;
 	default:
-		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "GoChkSDK");
+		sprintf_s(uuid_string, STRING_BUFFER_SIZE, "0x%04X", uuid);
 		result = false;
 		break;
 	}
 	return result;
+}
+
+/**
+cleanup stored data from connected device
+*/
+static void peripheral_cleanup() {
+	m_peer_addr = { 0 };
+	m_is_connected = false;
+	m_is_authenticated = false;
+	m_device_name_handle = 0;
+	m_battery_level_handle = 0;
+	m_chars_list.clear();
+	m_descs_list.clear();
 }
 
 #pragma endregion
@@ -370,7 +425,7 @@ static bool get_uuid_string(uint16_t uuid, char *uuid_string) {
 uint32_t scan_start(ble_gap_scan_params_t scan_param)
 {
 	//m_discovered_report = { 0 };
-	m_discover_list.clear();
+	m_adv_list.clear();
 
 #if NRF_SD_BLE_API >= 6
 	m_adv_report_buffer.p_data = mp_data;
@@ -407,9 +462,8 @@ uint32_t scan_start(ble_gap_scan_params_t scan_param)
 
 uint32_t conn_start(ble_gap_addr_t peer_addr)
 {
-	// cleanup previous list
-	m_chars_list.clear();
-	m_descs_list.clear();
+	// cleanup previous data
+	peripheral_cleanup();
 
 	m_connection_param.min_conn_interval = MIN_CONNECTION_INTERVAL;
 	m_connection_param.max_conn_interval = MAX_CONNECTION_INTERVAL;
@@ -476,7 +530,9 @@ uint32_t service_discovery_start(uint16_t uuid, uint8_t type)
 	uint16_t   start_handle = 0x01;
 	ble_uuid_t srvc_uuid;
 
-	printf("Discovering primary service:0x%04X\n", uuid);
+	char uuid_string[STRING_BUFFER_SIZE] = { 0 };
+	get_uuid_string(uuid, uuid_string);
+	printf("Discovering primary service:0x%04X(%s)\n", uuid, uuid_string);
 	fflush(stdout);
 
 	srvc_uuid.type = type;
@@ -564,19 +620,23 @@ static uint32_t read_device_name()
 set cccd notification to handles in m_descs_list,
 writting behavior works with on_write_response() and m_service_start_handle
 */
-static uint32_t register_cccd(uint16_t handle) {
-	if (handle == 0)
-		handle = m_service_start_handle;
-
+static uint32_t register_cccd(uint16_t handle)
+{
 	ble_gattc_write_params_t write_params;
 	uint8_t                  cccd_value[2] = { 1/*enable or disable*/, 0 };
 
+	// a flag indicates enabling nexts
+	bool enable_next = false;
 	uint32_t error_code = 0;
 	for (int i = 0; i < m_descs_list.size(); i++) {
-		// ignore handle if has been read
-		if (m_descs_list[i].handle < handle)
+		// ignore uuit not cccd
+		if (m_descs_list[i].uuid != BLE_UUID_CCCD)
 			continue;
-		if (m_descs_list[i].uuid.uuid == BLE_UUID_CCCD) {
+		// ignore if registered
+		if (m_descs_list[i].cccd_enabled)
+			continue;
+		// use first handle if given handle is null
+		if (m_descs_list[i].handle >= handle) {
 			write_params.handle = m_descs_list[i].handle;
 			write_params.len = 2;
 			write_params.p_value = cccd_value;
@@ -586,9 +646,19 @@ static uint32_t register_cccd(uint16_t handle) {
 			error_code = sd_ble_gattc_write(m_adapter, m_connection_handle, &write_params);
 			printf(" Write to register CCCD to handle:0x%04X code:%d\n", m_descs_list[i].handle, error_code);
 			fflush(stdout);
-			// can only call next handle from write response
+			enable_next = true;
 			break;
 		}
+	}
+
+	if (enable_next == false) {
+		for (int i = 0; i < m_descs_list.size(); i++) {
+			if (strlen((const char*)m_descs_list[i].report_ref) > 0) {
+				printf(" Check %04X ref data %02x %02x\n", 
+					m_descs_list[i].handle, m_descs_list[i].report_ref[0], m_descs_list[i].report_ref[1]);
+			}
+		}
+	// do something?
 	}
 
 	return error_code;
@@ -596,22 +666,22 @@ static uint32_t register_cccd(uint16_t handle) {
 
 /*
 read hid report reference data from handles in m_descs_list,
-reading behavior works with on_read_response() and m_service_start_handle
+reading behavior works with on_read_response()
 */
-static uint32_t read_references(uint16_t handle)
+static uint32_t read_report_refs(uint16_t handle)
 {
-	if (handle == 0)
-		handle = m_service_start_handle;
-
-	// a flag to indicate reading next
+	// a flag indicates reading next
 	bool read_next = false;
 	uint32_t error_code = 0;
 	for (int i = 0; i < m_descs_list.size(); i++) {
-		// ignore handle if has been read
-		if (m_descs_list[i].handle < handle)
+		// ignore uuid not report reference
+		if (m_descs_list[i].uuid != BLE_UUID_REPORT_REF_DESCR)
 			continue;
-		if (m_descs_list[i].uuid.uuid == BLE_UUID_REPORT_REF_DESCR) {
-			// read it!
+		// ignore handle if has been read
+		if (m_descs_list[i].ref_read)
+			continue;
+		if (m_descs_list[i].handle >= handle) {
+			// read it!, then check on_read_response()
 			error_code = sd_ble_gattc_read(
 				m_adapter,
 				m_connection_handle,
@@ -627,24 +697,27 @@ static uint32_t read_references(uint16_t handle)
 
 	// if there is no reference to read, register CCCD service
 	if (read_next == false) {
-		m_service_start_handle = 0;
 		register_cccd(0);
 	}
 
 	return error_code;
 }
 
-/* read reference data and register CCCD*/
+/* read all report reference and register CCCD*/
 uint32_t enable_service_start() {
-	m_service_start_handle = 0;
-	read_references(0);
+
+	read_report_refs(0);
 
 	return 0;
 }
 
-//TODO: not implemented, cleanup something for next scan_start
-uint32_t disconnect() {
-	return 0;
+/* disconnect action will response status BLE_HCI_LOCAL_HOST_TERMINATED_CONNECTION from BLE_GAP_EVT_DISCONNECTED */
+uint32_t dongle_disconnect() 
+{
+	uint32_t error_code = 0;
+	error_code = sd_ble_gap_disconnect(m_adapter, m_connection_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+	printf("DEBUG: disconnect code:%d\n", error_code);
+	return error_code;
 }
 
 //TODO: close or reset dongle
@@ -685,9 +758,9 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 	// Log the Bluetooth device address of advertisement packet received.
 	ble_address_to_string_convert(p_ble_gap_evt->params.adv_report.peer_addr, str);
 	std::string addr = std::string((char*)str);
-	if (m_discover_list.find(addr) == m_discover_list.end())
+	if (m_adv_list.find(addr) == m_adv_list.end())
 	{
-		m_discover_list.insert_or_assign(addr, p_ble_gap_evt->params.adv_report);
+		m_adv_list.insert_or_assign(addr, p_ble_gap_evt->params.adv_report);
 		char name[256] = { 0 };
 		get_adv_name(&p_ble_gap_evt->params.adv_report, name);
 		printf("Received adv report address: 0x%s rssi:%d rsp:%d name:%s\n",
@@ -767,6 +840,14 @@ static void on_connected(const ble_gap_evt_t * const p_ble_gap_evt)
 	m_connection_handle = p_ble_gap_evt->conn_handle;
 	m_connection_is_in_progress = false;
 
+	bool match = true;
+	for (int i = 0; i < BLE_GAP_ADDR_LEN; i++) {
+		if (p_ble_gap_evt->params.connected.peer_addr.addr[i] != m_peer_addr.addr[i]) {
+			match = false;
+			break;
+		}
+	}
+	m_is_connected = match;
 	// NOTICE: service discovery should wait before param updated event or bond for auth secure param(or passkey)
 	//bond_start();
 	// than
@@ -833,11 +914,19 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
 {
 	int count = p_ble_gattc_evt->params.char_disc_rsp.count;
 
+	// given empty handle range to use m_service_start_handle
+	ble_gattc_handle_range_t handle_range = { 0 };
+
 	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS)
 	{
 		printf(" Characteristic discovery failed. Error code 0x%X\n",
 			p_ble_gattc_evt->gatt_status);
 		fflush(stdout);
+		//TODO: move to next act if any error occurred
+		m_service_end_handle = m_service_start_handle;
+		if (m_on_srvc_discovered != NULL) {
+			m_on_srvc_discovered(m_service_start_handle);
+		}
 		return;
 	}
 
@@ -857,13 +946,10 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
 			p_ble_gattc_evt->params.char_disc_rsp.chars[i].char_props);
 		fflush(stdout);
 
-		// store services to list
+		// store characteristic to list
 		m_chars_list.push_back(p_ble_gattc_evt->params.char_disc_rsp.chars[i]);
 
 	}
-
-	// given empty handle range to use m_service_start_handle
-	ble_gattc_handle_range_t handle_range = { 0 };
 
 	descr_discovery_start(handle_range);
 }
@@ -878,10 +964,18 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 {
 	int count = p_ble_gattc_evt->params.desc_disc_rsp.count;
 
+	// given empty handle range to use m_service_start_handle
+	ble_gattc_handle_range_t handle_range = { 0 };
+
 	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS)
 	{
 		printf(" Descriptor discovery failed. Error code 0x%X\n", p_ble_gattc_evt->gatt_status);
 		fflush(stdout);
+		//TODO: move to next act if any error occurred
+		m_service_end_handle = m_service_start_handle;
+		if (m_on_srvc_discovered != NULL) {
+			m_on_srvc_discovered(m_service_start_handle);
+		}
 		return;
 	}
 
@@ -899,8 +993,11 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 			uuid_string);
 		fflush(stdout);
 
-		// store service to list
-		m_descs_list.push_back(p_ble_gattc_evt->params.desc_disc_rsp.descs[i]);
+		// store descriptor to list
+		dev_desc desc;
+		desc.handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
+		desc.uuid = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid;
+		m_descs_list.insert_or_assign(desc.handle, desc);
 
 		// save handle for next iteration
 		if (m_service_start_handle <= p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle)
@@ -938,9 +1035,6 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 			fflush(stdout);
 		}
 	}
-
-	// given empty handle range to use m_service_start_handle
-	ble_gattc_handle_range_t handle_range = { 0 };
 
 	// discover next iteration of characteristic and descriptor,
 	// otherwise read reference data(BLE_UUID_REPORT_REF_DESCR) and register notification(BLE_UUID_CCCD)
@@ -1013,20 +1107,19 @@ static void on_read_characteristic_values_response(const ble_gattc_evt_t *const 
 	auto len = p_ble_gattc_evt->params.char_vals_read_rsp.len;
 	uint8_t *p_data = (uint8_t *)p_ble_gattc_evt->params.char_vals_read_rsp.values;
 
-	char read_str[128] = { 0 };
-	memcpy_s(&read_str[0], len, p_data, len);
-	printf("Received read char vals len:%d data:", len);
-	for (int i = 0; i < len; i++) {
-		printf("%02x ", read_str[i]);
-	}
+	char read_bytes[DATA_BUFFER_SIZE] = { 0 };
+	memcpy_s(&read_bytes[0], DATA_BUFFER_SIZE, p_data, len);
+	printf("Received read char vals len:%d data: ", len);
+	print_byte_string(read_bytes, len);
 	printf("\n");
 	fflush(stdout);
 }
 
 static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 {
-	printf("Received read response from handle:0x%04X.\n",
-		p_ble_gattc_evt->params.read_rsp.handle);
+	auto rsp_handle = p_ble_gattc_evt->params.read_rsp.handle;
+
+	printf("Received read response from handle:0x%04X.\n", rsp_handle);
 	fflush(stdout);
 
 	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS)
@@ -1035,12 +1128,14 @@ static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 		// refer to BLE_GATT_STATUS_ATTERR_REQUEST_NOT_SUPPORTED if handle property not permitted
 		printf("Error read operation, error code 0x%x\n", p_ble_gattc_evt->gatt_status);
 		fflush(stdout);
+		//TODO: do something next if any error occurred
 		return;
 	}
 
 	if (p_ble_gattc_evt->params.read_rsp.len == 0) {
 		printf("Error read operation, no data length\n");
 		fflush(stdout);
+		//TODO: do something next if any error occurred
 		return;
 	}
 
@@ -1048,24 +1143,29 @@ static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 	uint16_t offset = p_ble_gattc_evt->params.read_rsp.offset;
 	uint16_t len = p_ble_gattc_evt->params.read_rsp.len;
 
-	char read_str[128] = { 0 };
-	memcpy_s(&read_str[0], len, p_data + offset, len);
-	printf("Received read len:%d data:", len);
-	for (int i = 0; i < len; i++) {
-		printf("%02x ", read_str[i]);
-	}
+	char read_bytes[DATA_BUFFER_SIZE] = { 0 };
+	memcpy_s(&read_bytes[0], DATA_BUFFER_SIZE, p_data + offset, len);
+	printf("Received read len:%d data: ", len);
+	print_byte_string(read_bytes, len);
 	printf("\n");
 	fflush(stdout);
 
-	// save handle for next read iteration
-	if (m_service_start_handle <= p_ble_gattc_evt->params.read_rsp.handle)
-		m_service_start_handle = p_ble_gattc_evt->params.read_rsp.handle + 1;
+	// store data to m_descs_list
+	if (len > 0) {
+		memcpy_s(&(m_descs_list[rsp_handle].report_ref[0]), len, p_data + offset, len);
+		m_descs_list[rsp_handle].ref_read = true;
+	}
 
-	// run next read iteration, given empty handle to use m_service_start_handle
+	// save handle for next read iteration if control by m_service_start_handle
+	if (m_service_start_handle <= rsp_handle)
+		m_service_start_handle = rsp_handle + 1;
+
 	if (m_service_start_handle < m_service_end_handle) {
 		printf(" DEBUG: m_service_start_handle increased:0x%04X\n", m_service_start_handle);
-		read_references(0);
 	}
+
+	// read next of report reference
+	read_report_refs(0);
 }
 
 /**@brief Function called on BLE_GATTC_EVT_WRITE_RSP event.
@@ -1074,8 +1174,9 @@ static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
  */
 static void on_write_response(const ble_gattc_evt_t * const p_ble_gattc_evt)
 {
-	printf("Received write response from handle:0x%04X.\n",
-		p_ble_gattc_evt->params.write_rsp.handle);
+	auto rsp_handle = p_ble_gattc_evt->params.write_rsp.handle;
+
+	printf("Received write response from handle:0x%04X.\n", rsp_handle);
 	fflush(stdout);
 
 	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS)
@@ -1085,15 +1186,20 @@ static void on_write_response(const ble_gattc_evt_t * const p_ble_gattc_evt)
 		return;
 	}
 
+	// store state to m_descs_list
+	m_descs_list[rsp_handle].cccd_enabled = true;
+
 	// save handle for next write iteration
-	if (m_service_start_handle <= p_ble_gattc_evt->params.write_rsp.handle)
-		m_service_start_handle = p_ble_gattc_evt->params.write_rsp.handle + 1;
+	if (m_service_start_handle <= rsp_handle)
+		m_service_start_handle = rsp_handle + 1;
 
 	// run next read iteration, given empty handle to use m_service_start_handle
 	if (m_service_start_handle < m_service_end_handle) {
 		printf(" DEBUG: m_service_start_handle increased:0x%04X\n", m_service_start_handle);
-		register_cccd(0);
 	}
+
+	// register next cccd handle
+	register_cccd(0);
 }
 
 /**@brief Function called on BLE_GATTC_EVT_HVX event.
@@ -1104,20 +1210,27 @@ static void on_write_response(const ble_gattc_evt_t * const p_ble_gattc_evt)
  */
 static void on_hvx(const ble_gattc_evt_t * const p_ble_gattc_evt)
 {
-	printf("DEBUG: Received handle value notication from 0x%x len=%d\n", p_ble_gattc_evt->params.hvx.handle, p_ble_gattc_evt->params.hvx.len);
+	auto hvx_handle = p_ble_gattc_evt->params.hvx.handle;
+	auto len = p_ble_gattc_evt->params.hvx.len;
+	auto p_data = p_ble_gattc_evt->params.hvx.data;
+
+	char uuid_string[STRING_BUFFER_SIZE] = { 0 };
+	get_uuid_string(m_descs_list[hvx_handle].uuid, uuid_string);
+	printf("Received notification from handle:0x%04X uuid:0x%04X(%s)\n", 
+		hvx_handle, m_descs_list[hvx_handle].uuid, uuid_string);
 	fflush(stdout);
-	//TODO: check handle value for indication
-	//if (p_ble_gattc_evt->params.hvx.handle >= m_hrm_char_handle ||
-	//	p_ble_gattc_evt->params.hvx.handle <= m_hrm_cccd_handle) // Heart rate measurement.
-	//{
-	//	// We know the heart rate reading is encoded as 2 bytes [flag, value].
-	//	printf("Received heart rate measurement: %d\n", p_ble_gattc_evt->params.hvx.data[1]);
-	//}
-	//else // Unknown data.
-	{
-		printf("Un-parsed data received on handle: %04X\n", p_ble_gattc_evt->params.hvx.handle);
+
+	if (len == 0) {
+		printf("Received notification no data present.\n");
+		fflush(stdout);
+		return;
 	}
 
+	char read_bytes[DATA_BUFFER_SIZE] = { 0 };
+	memcpy_s(&read_bytes[0], DATA_BUFFER_SIZE, p_data, len);
+	printf("Received notification len:%d data: ", len);
+	print_byte_string(read_bytes, len);
+	printf("\n");
 	fflush(stdout);
 }
 
@@ -1200,7 +1313,10 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		fflush(stdout);
 		m_connected_devices--;
 		m_connection_handle = 0;
-		//TODO: cleanup or do something
+		peripheral_cleanup();
+		if (m_on_disconnected != NULL) {
+			m_on_disconnected(p_ble_evt->evt.gap_evt.params.disconnected);
+		}
 		break;
 
 	case BLE_GAP_EVT_CONN_PARAM_UPDATE_REQUEST:
@@ -1254,6 +1370,9 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 			p_ble_evt->evt.gap_evt.params.auth_status.auth_status,
 			p_ble_evt->evt.gap_evt.params.auth_status.bonded);
 		fflush(stdout);
+		if (p_ble_evt->evt.gap_evt.params.auth_status.auth_status == NRF_SUCCESS &&
+			p_ble_evt->evt.gap_evt.params.auth_status.bonded == 1)
+			m_is_authenticated = true;
 		// NOTICE: let caller decide the next, may be wait util conn param updated for service discovery
 		//         can service discovery start as next action from caller
 		if (m_on_authenticated != NULL) {
@@ -1512,6 +1631,8 @@ uint32_t set_callback(std::string fn_name, void* fn) {
 		m_on_authenticated = (fn_on_authenticated)fn;
 	else if (fn_name.compare("fn_on_srvc_discovered") == 0)
 		m_on_srvc_discovered = (fn_on_srvc_discovered)fn;
+	else if (fn_name.compare("fn_on_disconnected") == 0)
+		m_on_disconnected = (fn_on_disconnected)fn;
 
 	return 0;
 }

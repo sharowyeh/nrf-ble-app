@@ -66,6 +66,8 @@
 
 #include <vector>
 #include <string>
+#include <condition_variable>
+#include <mutex>
 
 /** Definitions */
 #define DEFAULT_BAUD_RATE 1000000 /**< The baud rate to be used for serial communication with nRF5 device. */
@@ -1692,7 +1694,8 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 
 uint32_t on_dev_discovered(ble_gap_evt_adv_report_t &report, std::string &addr, std::string &name)
 {
-	if (addr.compare("112233445566") == 0)
+	if (addr.compare("112233445566") == 0 || 
+		addr.compare("ED156EBFA2CB") == 0)
 	{
 		if (m_connected_devices >= MAX_PEER_COUNT || m_connection_is_in_progress)
 		{
@@ -1735,6 +1738,19 @@ uint32_t on_srvc_discovered(uint16_t &last_handle)
 	return 0;
 }
 
+std::mutex mtx;
+std::condition_variable cond;
+
+// TODO: close dongle?
+uint32_t on_dev_disconnected(ble_gap_evt_disconnected_t &disconn) {
+	// 0x16: close by user terminate, 0x8: close by stack timeout(power off)
+	//if (disconn.reason == 0x16) {
+		cond.notify_all();
+	//}
+
+	return 0;
+}
+
 /** Main */
 
 /**@brief Function for application main entry.
@@ -1748,6 +1764,7 @@ int main(int argc, char * argv[])
 	set_callback("fn_on_connected", &on_dev_connected);
 	set_callback("fn_on_authenticated", &on_dev_authenticated);
 	set_callback("fn_on_srvc_discovered", &on_srvc_discovered);
+	set_callback("fn_on_disconnected", &on_dev_disconnected);
 
 	//// init ecc and generate keypair for later usage?
 	//ecc_init();
@@ -1827,6 +1844,12 @@ int main(int argc, char * argv[])
         char c = (char)getchar();
         if (c == 'q' || c == 'Q')
         {
+			auto err = dongle_disconnect();
+			// if success, wait until dongle_disconnect() finished;
+			if (err = 0) {
+				std::unique_lock<std::mutex> lck{ mtx };
+				cond.wait(lck);
+			}
 			dongle_close();
             /*error_code = sd_rpc_close(m_adapter);
 
