@@ -8,6 +8,7 @@
 #include <vector>
 #include <map>
 #include <string>
+#include <algorithm>
 
 enum
 {
@@ -46,15 +47,9 @@ enum
 #define STRING_BUFFER_SIZE 50
 #define DATA_BUFFER_SIZE 256
 
-typedef struct
-{
-	uint8_t *     p_data;   /**< Pointer to data. */
-	uint16_t      data_len; /**< Length of data. */
-} data_t;
-
 
 /** Global variables */
-static ble_gap_addr_t m_peer_addr = { 0 }; /* intent or connected peripheral address */
+static addr_t      m_connected_addr = { 0 }; /* intent or connected peripheral address */
 static bool        m_is_connected = false; /* m_peer_addr has been connected(BLE_GAP_EVT_DISCONNECTED) */
 static bool	       m_is_authenticated = false; /* m_peer_addr has been authenticated(BLE_GAP_EVT_AUTH_STATUS) */
 static uint8_t     m_connected_devices = 0; /* number of connected devices */
@@ -65,27 +60,40 @@ static uint16_t    m_device_name_handle = 0;
 static uint16_t    m_battery_level_handle = 0;
 static bool        m_connection_is_in_progress = false;
 static adapter_t * m_adapter = NULL;
-static fn_on_discovered      m_on_discovered = NULL;
-static fn_on_connected       m_on_connected = NULL;
-static fn_on_authenticated   m_on_authenticated = NULL;
-static fn_on_srvc_discovered m_on_srvc_discovered = NULL;
-static fn_on_disconnected    m_on_disconnected = NULL;
+//TODO: callback ptr could be multiple 
+static fn_on_discovered         m_on_discovered = NULL;
+static fn_on_connected          m_on_connected = NULL;
+static fn_on_disconnected       m_on_disconnected = NULL;
+static fn_on_passkey_required   m_on_passkey_required = NULL;
+static fn_on_authenticated      m_on_authenticated = NULL;
+static fn_on_service_discovered m_on_service_discovered = NULL;
+static fn_on_service_enabled    m_on_service_enabled = NULL;
+static fn_on_failed             m_on_failed = NULL;
+static fn_on_data_received      m_on_data_received = NULL;
 
 /* Advertising addresses */
 std::map<std::string, ble_gap_evt_adv_report_t> m_adv_list; /*addr, report*/
 
+/* Discovered characteristic data structure */
 typedef struct {
-	uint16_t handle = 0;
-	uint16_t uuid = 0;
-	unsigned char report_ref[32] = { 0 };
-	bool ref_read = false;
-	bool cccd_enabled = false;
-} dev_desc;
+	uint16_t handle = 0; /* ble_gattc_char_t::handle_value */
+	uint16_t uuid = 0; /* ble_gattc_char_t::uuid */
+	ble_gattc_handle_range_t handle_range = { 0, 0 }; /* handle range of descs */
+	uint16_t report_ref_handle = 0; /* none zero which has BLE_UUID_REPORT_REF_DESCR desc */
+	unsigned char report_ref[32] = { 0 }; /* reference value of BLE_UUID_REPORT_REF_DESCR desc */
+	bool report_ref_is_read = false; /* report reference is read */
+	uint16_t cccd_handle = 0; /* none zero which has BLE_UUID_CCCD desc */
+	bool cccd_enabled = false; /* enable state of BLE_UUID_CCCD desc */
+	std::vector<ble_gattc_desc_t> desc_list;
+} dev_char_t;
 
 /* Discovered handles */
-static std::vector<ble_gattc_char_t> m_chars_list;
-static std::map<uint16_t, dev_desc> m_descs_list; /*handle, dev_desc*/
+static std::vector<dev_char_t> m_char_list;
+static uint32_t m_char_idx = 0; // discover procedure index
 
+/* Data buffer for hvx */
+static data_t m_hvx_data = { 
+	(uint8_t*)calloc(STRING_BUFFER_SIZE, sizeof(uint8_t)), 0}; /*p_data, data_len*/
 
 #if NRF_SD_BLE_API >= 5
 static uint32_t    m_config_id = 1;
@@ -401,16 +409,16 @@ static bool get_uuid_string(uint16_t uuid, char *uuid_string) {
 }
 
 /**
-cleanup stored data from connected device
+cleanup stored data for connected device
 */
-static void peripheral_cleanup() {
-	m_peer_addr = { 0 };
+static void connection_cleanup() {
+	m_connected_addr = { 0 };
 	m_is_connected = false;
 	m_is_authenticated = false;
 	m_device_name_handle = 0;
 	m_battery_level_handle = 0;
-	m_chars_list.clear();
-	m_descs_list.clear();
+	m_char_list.clear();
+	m_char_idx = 0;
 }
 
 #pragma endregion
@@ -422,7 +430,7 @@ static void peripheral_cleanup() {
  * *
  * @return NRF_SUCCESS on successfully initiating scanning procedure, otherwise an error code.
  */
-uint32_t scan_start(ble_gap_scan_params_t scan_param)
+uint32_t scan_start(float interval, float window, bool active, uint16_t timeout)
 {
 	//m_discovered_report = { 0 };
 	m_adv_list.clear();
@@ -436,9 +444,10 @@ uint32_t scan_start(ble_gap_scan_params_t scan_param)
 
 	// scan-param-v5: 0,0,0,SCAN_INTERVAL,SCAN_WINDOW,SCAN_TIMEOUT
 	//                active,selective(whitelist),adv_dir_report
-	m_scan_param.interval = 0x0140; // 0x00A0=100ms, 0x0140=200ms
-	m_scan_param.window = 0x00A0; // 0x0050=50ms
-	m_scan_param.active = 1;
+	m_scan_param.interval = MSEC_TO_UNITS(interval, UNIT_0_625_MS); // 0x00A0=100ms, 0x0140=200ms
+	m_scan_param.window = MSEC_TO_UNITS(window, UNIT_0_625_MS); // 0x0050=50ms
+	m_scan_param.active = active ? 1 : 0;
+	m_scan_param.timeout = timeout;
 
 	uint32_t error_code = sd_ble_gap_scan_start(m_adapter, &m_scan_param
 #if NRF_SD_BLE_API >= 6
@@ -460,10 +469,16 @@ uint32_t scan_start(ble_gap_scan_params_t scan_param)
 	return error_code;
 }
 
-uint32_t conn_start(ble_gap_addr_t peer_addr)
+uint32_t conn_start(addr_t peer_addr)
 {
 	// cleanup previous data
-	peripheral_cleanup();
+	connection_cleanup();
+
+	ble_gap_addr_t addr;
+	addr.addr_id_peer = 1;
+	addr.addr_type = peer_addr.addr_type;
+	memcpy_s(addr.addr, BLE_GAP_ADDR_LEN, peer_addr.addr, BLE_GAP_ADDR_LEN);
+	memcpy_s(&m_connected_addr, sizeof(addr_t), &peer_addr, sizeof(addr_t));
 
 	m_connection_param.min_conn_interval = MIN_CONNECTION_INTERVAL;
 	m_connection_param.max_conn_interval = MAX_CONNECTION_INTERVAL;
@@ -477,7 +492,7 @@ uint32_t conn_start(ble_gap_addr_t peer_addr)
 
 	uint32_t err_code;
 	err_code = sd_ble_gap_connect(m_adapter,
-		&(peer_addr),
+		&(addr),
 		&m_scan_param,
 		&m_connection_param
 #if NRF_SD_BLE_API >= 5
@@ -496,7 +511,7 @@ uint32_t conn_start(ble_gap_addr_t peer_addr)
 	return err_code;
 }
 
-uint32_t bond_start(ble_gap_sec_params_t sec_params)
+uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps)
 {
 	uint32_t error_code;
 
@@ -506,7 +521,9 @@ uint32_t bond_start(ble_gap_sec_params_t sec_params)
 	printf("DEBUG: get security, return=%d mode=%d level=%d\n", error_code, conn_sec.sec_mode.sm, conn_sec.sec_mode.lv);
 	fflush(stdout);
 
-	//TODO: given sec_params or m_sec_params
+	m_sec_params.bond = bond ? 1 : 0;
+	m_sec_params.keypress = keypress ? 1 : 0;
+	m_sec_params.io_caps = io_caps;
 
 	// NOTICE: refer to driver, testcase_security.cpp, we'll use the default security params
 	error_code = sd_ble_gap_authenticate(m_adapter, m_connection_handle, &m_sec_params);
@@ -591,7 +608,7 @@ static uint32_t descr_discovery_start(ble_gattc_handle_range_t handle_range)
 		return NRF_ERROR_INVALID_STATE;
 	}*/
 
-	printf("Discovering characteristic's descriptors, handle range:0x%04X - 0x%04X\n",
+	printf("Discovering descriptors, handle range:0x%04X - 0x%04X\n",
 		handle_range.start_handle, handle_range.end_handle);
 	fflush(stdout);
 
@@ -599,12 +616,12 @@ static uint32_t descr_discovery_start(ble_gattc_handle_range_t handle_range)
 }
 
 /*
-read device name from GAP which handle_value in m_chars_list(or handle in m_descs_list)
+read device name from GAP which handle_value in m_char_list(handle in desc_list)
 */
 static uint32_t read_device_name()
 {
 	uint32_t error_code = 0;
-	// use m_device_name_handle or find BLE_UUID_GAP_CHARACTERISTIC_DEVICE_NAME in m_descs_list
+	// use m_device_name_handle or find BLE_UUID_GAP_CHARACTERISTIC_DEVICE_NAME in desc_list
 	uint16_t value_handle = m_device_name_handle;
 	error_code = sd_ble_gattc_read(
 		m_adapter,
@@ -617,10 +634,10 @@ static uint32_t read_device_name()
 }
 
 /*
-set cccd notification to handles in m_descs_list,
+set cccd notification to handles in m_char_list(or handle in its desc_list),
 writting behavior works with on_write_response() and m_service_start_handle
 */
-static uint32_t register_cccd(uint16_t handle)
+static uint32_t set_cccd_notification(uint16_t handle)
 {
 	ble_gattc_write_params_t write_params;
 	uint8_t                  cccd_value[2] = { 1/*enable or disable*/, 0 };
@@ -628,23 +645,24 @@ static uint32_t register_cccd(uint16_t handle)
 	// a flag indicates enabling nexts
 	bool enable_next = false;
 	uint32_t error_code = 0;
-	for (int i = 0; i < m_descs_list.size(); i++) {
-		// ignore uuit not cccd
-		if (m_descs_list[i].uuid != BLE_UUID_CCCD)
+	for (int i = 0; i < m_char_list.size(); i++) {
+		// ignore uuid not cccd
+		if (m_char_list[i].cccd_handle == 0)
 			continue;
 		// ignore if registered
-		if (m_descs_list[i].cccd_enabled)
+		if (m_char_list[i].cccd_enabled)
 			continue;
 		// use first handle if given handle is null
-		if (m_descs_list[i].handle >= handle) {
-			write_params.handle = m_descs_list[i].handle;
+		if (m_char_list[i].cccd_handle >= handle) {
+			m_char_idx = i;
+			write_params.handle = m_char_list[m_char_idx].cccd_handle;
 			write_params.len = 2;
 			write_params.p_value = cccd_value;
 			write_params.write_op = BLE_GATT_OP_WRITE_REQ;
 			write_params.offset = 0;
 			// write it!
 			error_code = sd_ble_gattc_write(m_adapter, m_connection_handle, &write_params);
-			printf(" Write to register CCCD to handle:0x%04X code:%d\n", m_descs_list[i].handle, error_code);
+			printf(" Write to register CCCD handle:0x%04X code:%d\n", m_char_list[m_char_idx].cccd_handle, error_code);
 			fflush(stdout);
 			enable_next = true;
 			break;
@@ -652,20 +670,25 @@ static uint32_t register_cccd(uint16_t handle)
 	}
 
 	if (enable_next == false) {
-		for (int i = 0; i < m_descs_list.size(); i++) {
-			if (strlen((const char*)m_descs_list[i].report_ref) > 0) {
-				printf(" Check %04X ref data %02x %02x\n", 
-					m_descs_list[i].handle, m_descs_list[i].report_ref[0], m_descs_list[i].report_ref[1]);
+		// invoke callback to caller when serviec enabled
+		if (m_on_service_enabled != NULL) {
+			m_on_service_enabled();
+		}
+		//DEBUG: display saved data or do something further
+		for (int i = 0; i < m_char_list.size(); i++) {
+			if (m_char_list[i].report_ref_is_read) {
+				printf(" Char %04X Desc %04X ref data %02x %02x\n", 
+					m_char_list[i].handle, m_char_list[i].report_ref_handle, 
+					m_char_list[i].report_ref[0], m_char_list[i].report_ref[1]);
 			}
 		}
-	// do something?
 	}
 
 	return error_code;
 }
 
 /*
-read hid report reference data from handles in m_descs_list,
+read hid report reference data from m_char_list(or handle in its desc_list),
 reading behavior works with on_read_response()
 */
 static uint32_t read_report_refs(uint16_t handle)
@@ -673,21 +696,22 @@ static uint32_t read_report_refs(uint16_t handle)
 	// a flag indicates reading next
 	bool read_next = false;
 	uint32_t error_code = 0;
-	for (int i = 0; i < m_descs_list.size(); i++) {
+	for (int i = 0; i < m_char_list.size(); i++) {
 		// ignore uuid not report reference
-		if (m_descs_list[i].uuid != BLE_UUID_REPORT_REF_DESCR)
+		if (m_char_list[i].report_ref_handle == 0)
 			continue;
-		// ignore handle if has been read
-		if (m_descs_list[i].ref_read)
+		// ignore handle if already read
+		if (m_char_list[i].report_ref_is_read)
 			continue;
-		if (m_descs_list[i].handle >= handle) {
+		if (m_char_list[i].report_ref_handle >= handle) {
+			m_char_idx = i;
 			// read it!, then check on_read_response()
 			error_code = sd_ble_gattc_read(
 				m_adapter,
 				m_connection_handle,
-				m_descs_list[i].handle, 0
+				m_char_list[m_char_idx].report_ref_handle, 0
 			);
-			printf(" Read value from handle:0x%04X code:%d\n", m_descs_list[i].handle, error_code);
+			printf(" Read value from handle:0x%04X code:%d\n", m_char_list[m_char_idx].report_ref_handle, error_code);
 			fflush(stdout);
 			read_next = true;
 			// can only call next handle from read response
@@ -695,16 +719,16 @@ static uint32_t read_report_refs(uint16_t handle)
 		}
 	}
 
-	// if there is no reference to read, register CCCD service
+	// if there is no reference to read, set CCCD notification
 	if (read_next == false) {
-		register_cccd(0);
+		set_cccd_notification(0);
 	}
 
 	return error_code;
 }
 
-/* read all report reference and register CCCD*/
-uint32_t enable_service_start() {
+/* read all report reference and set CCCD notification */
+uint32_t service_enable_start() {
 
 	read_report_refs(0);
 
@@ -733,6 +757,7 @@ uint32_t dongle_close() {
 
 	printf("Closed\n");
 	fflush(stdout);
+	return error_code;
 }
 
 #pragma endregion
@@ -758,9 +783,13 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 	// Log the Bluetooth device address of advertisement packet received.
 	ble_address_to_string_convert(p_ble_gap_evt->params.adv_report.peer_addr, str);
 	std::string addr = std::string((char*)str);
-	if (m_adv_list.find(addr) == m_adv_list.end())
+
+	// set flag if new arrival, and list always up-to-date
+	bool new_arrival = (m_adv_list.find(addr) == m_adv_list.end());
+	m_adv_list.insert_or_assign(addr, p_ble_gap_evt->params.adv_report);
+
+	if (new_arrival)
 	{
-		m_adv_list.insert_or_assign(addr, p_ble_gap_evt->params.adv_report);
 		char name[256] = { 0 };
 		get_adv_name(&p_ble_gap_evt->params.adv_report, name);
 		printf("Received adv report address: 0x%s rssi:%d rsp:%d name:%s\n",
@@ -775,7 +804,11 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 		// report callback to caller
 		if (m_on_discovered != NULL) {
 			std::string str_name = std::string(name);
-			m_on_discovered((ble_gap_evt_adv_report_t&)(p_ble_gap_evt->params.adv_report), addr, str_name);
+			addr_t report;
+			report.rssi = p_ble_gap_evt->params.adv_report.rssi;
+			report.addr_type = p_ble_gap_evt->params.adv_report.peer_addr.addr_type;
+			memcpy_s(report.addr, BLE_GAP_ADDR_LEN, p_ble_gap_evt->params.adv_report.peer_addr.addr, BLE_GAP_ADDR_LEN);
+			m_on_discovered(addr, str_name, report);
 		}
 	}
 
@@ -842,12 +875,16 @@ static void on_connected(const ble_gap_evt_t * const p_ble_gap_evt)
 
 	bool match = true;
 	for (int i = 0; i < BLE_GAP_ADDR_LEN; i++) {
-		if (p_ble_gap_evt->params.connected.peer_addr.addr[i] != m_peer_addr.addr[i]) {
+		if (p_ble_gap_evt->params.connected.peer_addr.addr[i] != m_connected_addr.addr[i]) {
 			match = false;
 			break;
 		}
 	}
 	m_is_connected = match;
+
+	if (m_on_connected != NULL) {
+		m_on_connected(m_connected_addr);
+	}
 	// NOTICE: service discovery should wait before param updated event or bond for auth secure param(or passkey)
 	//bond_start();
 	// than
@@ -914,18 +951,13 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
 {
 	int count = p_ble_gattc_evt->params.char_disc_rsp.count;
 
-	// given empty handle range to use m_service_start_handle
-	ble_gattc_handle_range_t handle_range = { 0 };
-
-	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS)
+	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS || count == 0)
 	{
-		printf(" Characteristic discovery failed. Error code 0x%X\n",
-			p_ble_gattc_evt->gatt_status);
+		printf(" Characteristic discovery failed or empty, code 0x%X count=%d\n",
+			p_ble_gattc_evt->gatt_status, count);
 		fflush(stdout);
-		//TODO: move to next act if any error occurred
-		m_service_end_handle = m_service_start_handle;
-		if (m_on_srvc_discovered != NULL) {
-			m_on_srvc_discovered(m_service_start_handle);
+		if (m_on_service_discovered != NULL) {
+			m_on_service_discovered(m_service_start_handle);
 		}
 		return;
 	}
@@ -947,11 +979,23 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
 		fflush(stdout);
 
 		// store characteristic to list
-		m_chars_list.push_back(p_ble_gattc_evt->params.char_disc_rsp.chars[i]);
+		if (m_char_list.size() > 0) {
+			m_char_list[m_char_list.size() - 1].handle_range.end_handle = 
+				p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_decl - 1;
+		}
+		dev_char_t dev_char;
+		dev_char.handle = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value;
+		dev_char.uuid = p_ble_gattc_evt->params.char_disc_rsp.chars[i].uuid.uuid;
+		dev_char.handle_range.start_handle = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_decl;
+		dev_char.handle_range.end_handle = m_service_end_handle;
+		m_char_list.push_back(dev_char);
 
+		//m_chars_list.push_back(p_ble_gattc_evt->params.char_disc_rsp.chars[i]);
 	}
-
-	descr_discovery_start(handle_range);
+	
+	// NOTICE: m_char_idx increases in on_descriptor_discovery_response
+	if (m_char_idx < m_char_list.size())
+		descr_discovery_start(m_char_list[m_char_idx].handle_range);
 }
 
 /**@brief Function called on BLE_GATTC_EVT_DESC_DISC_RSP event.
@@ -964,17 +1008,12 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 {
 	int count = p_ble_gattc_evt->params.desc_disc_rsp.count;
 
-	// given empty handle range to use m_service_start_handle
-	ble_gattc_handle_range_t handle_range = { 0 };
-
-	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS)
+	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS || count == 0)
 	{
-		printf(" Descriptor discovery failed. Error code 0x%X\n", p_ble_gattc_evt->gatt_status);
+		printf(" Descriptor discovery failed or empty, code 0x%X count=%d\n", p_ble_gattc_evt->gatt_status, count);
 		fflush(stdout);
-		//TODO: move to next act if any error occurred
-		m_service_end_handle = m_service_start_handle;
-		if (m_on_srvc_discovered != NULL) {
-			m_on_srvc_discovered(m_service_start_handle);
+		if (m_on_service_discovered != NULL) {
+			m_on_service_discovered(m_service_start_handle);
 		}
 		return;
 	}
@@ -994,18 +1033,15 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 		fflush(stdout);
 
 		// store descriptor to list
-		dev_desc desc;
-		desc.handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
-		desc.uuid = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid;
-		m_descs_list.insert_or_assign(desc.handle, desc);
-
-		// save handle for next iteration
-		if (m_service_start_handle <= p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle)
-			m_service_start_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle + 1;
+		ble_gattc_desc_t dev_desc = p_ble_gattc_evt->params.desc_disc_rsp.descs[i];
+		m_char_list[m_char_idx].desc_list.push_back(dev_desc);
 
 		//TODO: set cccd notification, moved to register_cccd();
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_CCCD)
 		{
+			m_char_list[m_char_idx].cccd_handle = dev_desc.handle;
+			printf("DEBUG: CCCD descriptor saved, handle=%x\n", dev_desc.handle);
+			fflush(stdout);
 			/*if (m_hrm_cccd_handle == 0) {
 				m_hrm_cccd_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
 				printf("DEBUG: CCCD handle saved, handle=%x\n", m_hrm_cccd_handle);
@@ -1015,6 +1051,9 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 		//TODO: report reference descriptor, moved to read_references()
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_REPORT_REF_DESCR)
 		{
+			m_char_list[m_char_idx].report_ref_handle = dev_desc.handle;
+			printf("DEBUG: Report reference descriptor saved, handle=%x\n", dev_desc.handle);
+			fflush(stdout);
 		}
 
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_BATTERY_LEVEL_CHAR)
@@ -1036,19 +1075,16 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 		}
 	}
 
-	// discover next iteration of characteristic and descriptor,
-	// otherwise read reference data(BLE_UUID_REPORT_REF_DESCR) and register notification(BLE_UUID_CCCD)
-	if (m_service_start_handle < m_service_end_handle) {
-		char_discovery_start(handle_range);
+	if (++m_char_idx < m_char_list.size()) {
+		// move next characteristic
+		descr_discovery_start(m_char_list[m_char_idx].handle_range);
 	}
 	else {
-		// NOTICE: callback to caller for next action
-		if (m_on_srvc_discovered != NULL) {
-			m_on_srvc_discovered(m_service_start_handle);
+		if (m_on_service_discovered != NULL) {
+			m_on_service_discovered(m_service_start_handle);
 		}
-		//m_service_start_handle = 0;
-		//read_references(0);
 	}
+
 }
 
 
@@ -1119,7 +1155,7 @@ static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 {
 	auto rsp_handle = p_ble_gattc_evt->params.read_rsp.handle;
 
-	printf("Received read response from handle:0x%04X.\n", rsp_handle);
+	printf("Received read response handle:0x%04X ", rsp_handle);
 	fflush(stdout);
 
 	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS)
@@ -1145,27 +1181,22 @@ static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 
 	char read_bytes[DATA_BUFFER_SIZE] = { 0 };
 	memcpy_s(&read_bytes[0], DATA_BUFFER_SIZE, p_data + offset, len);
-	printf("Received read len:%d data: ", len);
+	printf("len:%d data: ", len);
 	print_byte_string(read_bytes, len);
 	printf("\n");
 	fflush(stdout);
 
-	// store data to m_descs_list
-	if (len > 0) {
-		memcpy_s(&(m_descs_list[rsp_handle].report_ref[0]), len, p_data + offset, len);
-		m_descs_list[rsp_handle].ref_read = true;
+	// check handle is report reference descriptor, to read the next report reference.
+	//ASSERT: rsp_handle == m_char_list[m_char_idx].report_ref_handle
+	for (int i = 0; i < m_char_list.size(); i++) {
+		if (m_char_list[i].report_ref_handle == rsp_handle) {
+			memcpy_s(&(m_char_list[i].report_ref[0]), len, p_data + offset, len);
+			m_char_list[i].report_ref_is_read = true;
+			// read the next report reference
+			read_report_refs(0);
+			break;
+		}
 	}
-
-	// save handle for next read iteration if control by m_service_start_handle
-	if (m_service_start_handle <= rsp_handle)
-		m_service_start_handle = rsp_handle + 1;
-
-	if (m_service_start_handle < m_service_end_handle) {
-		printf(" DEBUG: m_service_start_handle increased:0x%04X\n", m_service_start_handle);
-	}
-
-	// read next of report reference
-	read_report_refs(0);
 }
 
 /**@brief Function called on BLE_GATTC_EVT_WRITE_RSP event.
@@ -1186,20 +1217,16 @@ static void on_write_response(const ble_gattc_evt_t * const p_ble_gattc_evt)
 		return;
 	}
 
-	// store state to m_descs_list
-	m_descs_list[rsp_handle].cccd_enabled = true;
-
-	// save handle for next write iteration
-	if (m_service_start_handle <= rsp_handle)
-		m_service_start_handle = rsp_handle + 1;
-
-	// run next read iteration, given empty handle to use m_service_start_handle
-	if (m_service_start_handle < m_service_end_handle) {
-		printf(" DEBUG: m_service_start_handle increased:0x%04X\n", m_service_start_handle);
+	// check handle is CCCD, to set the next CCCD notification.
+	//ASSERT: rsp_handle == m_char_list[m_char_idx].cccd_handle
+	for (int i = 0; i < m_char_list.size(); i++) {
+		if (m_char_list[i].cccd_handle == rsp_handle) {
+			m_char_list[i].cccd_enabled = true;
+			// set the next cccd handle
+			set_cccd_notification(0);
+			break;
+		}
 	}
-
-	// register next cccd handle
-	register_cccd(0);
 }
 
 /**@brief Function called on BLE_GATTC_EVT_HVX event.
@@ -1214,24 +1241,47 @@ static void on_hvx(const ble_gattc_evt_t * const p_ble_gattc_evt)
 	auto len = p_ble_gattc_evt->params.hvx.len;
 	auto p_data = p_ble_gattc_evt->params.hvx.data;
 
-	char uuid_string[STRING_BUFFER_SIZE] = { 0 };
-	get_uuid_string(m_descs_list[hvx_handle].uuid, uuid_string);
-	printf("Received notification from handle:0x%04X uuid:0x%04X(%s)\n", 
-		hvx_handle, m_descs_list[hvx_handle].uuid, uuid_string);
-	fflush(stdout);
+	uint32_t char_idx = -1;
+	for (int i = 0; i < m_char_list.size(); i++) {
+		if (m_char_list[i].handle == hvx_handle) {
+			char_idx = i;
+			break;
+		}
+	}
+	if (char_idx == -1) {
+		printf("Received hvx from handle:0x%04X not in list ", hvx_handle);
+		fflush(stdout);
+	}
+	else {
+		char uuid_string[STRING_BUFFER_SIZE] = { 0 };
+		get_uuid_string(m_char_list[char_idx].uuid, uuid_string);
+		printf("Received hvx from handle:0x%04X uuid:0x%04X(%s) ",
+			hvx_handle, m_char_list[char_idx].uuid, uuid_string);
+		fflush(stdout);
+		if (m_char_list[char_idx].report_ref_is_read) {
+			printf("ref:");
+			print_byte_string((char *)(m_char_list[char_idx].report_ref), 2);
+			fflush(stdout);
+		}
+	}
 
 	if (len == 0) {
-		printf("Received notification no data present.\n");
+		printf("no data present.\n");
 		fflush(stdout);
 		return;
 	}
 
-	char read_bytes[DATA_BUFFER_SIZE] = { 0 };
-	memcpy_s(&read_bytes[0], DATA_BUFFER_SIZE, p_data, len);
-	printf("Received notification len:%d data: ", len);
-	print_byte_string(read_bytes, len);
+	printf("len:%d data: ", len);
+	print_byte_string((char*)p_data, len);
 	printf("\n");
 	fflush(stdout);
+
+	//TODO: make a buffer or queue
+	memcpy_s(m_hvx_data.p_data, DATA_BUFFER_SIZE, p_data, len);
+	m_hvx_data.data_len = len;
+	if (m_on_data_received != NULL) {
+		m_on_data_received(hvx_handle, m_hvx_data);
+	}
 }
 
 /**@brief Function called on BLE_GAP_EVT_CONN_PARAM_UPDATE_REQUEST event.
@@ -1260,12 +1310,11 @@ static void on_conn_params_update_request(const ble_gap_evt_t * const p_ble_gap_
 	}
 }
 
+/*
+connection parameters responsed from peripheral
+*/
 static void on_conn_params_update(const ble_gap_evt_t * const p_ble_gap_evt)
 {
-	// DEBUG: copied from nordic_uart_client example
-	printf("DEBUG: evt_conn_param_updat\n");
-	//ble_gap_conn_params_t * conn_params;
-
 	auto conn_params = &(p_ble_gap_evt->params.conn_param_update.conn_params);
 
 	printf("Connection parameters updated. New parameters:\n");
@@ -1279,6 +1328,37 @@ static void on_conn_params_update(const ble_gap_evt_t * const p_ble_gap_evt)
 	error_code = sd_ble_gap_conn_sec_get(m_adapter, m_connection_handle, &conn_sec);
 	printf("DEBUG: get security code=%d mode=%d level=%d\n", error_code, conn_sec.sec_mode.sm, conn_sec.sec_mode.lv);
 }
+
+/*
+request security parameters for peripheral authentication
+*/
+static void on_sec_params_request(const ble_gap_evt_t * const p_ble_gap_evt)
+{
+	auto peer_params = p_ble_gap_evt->params.sec_params_request.peer_params;
+
+	printf("DEBUG: on security params request, peer: bond=%d io=%d min=%d max=%d ownenc=%d peerenc=%d\n",
+		peer_params.bond, peer_params.io_caps,
+		peer_params.min_key_size, peer_params.max_key_size,
+		peer_params.kdist_own.enc, peer_params.kdist_peer.enc);
+
+	memcpy_s(m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, m_public_key, ECC_P256_PK_LEN);
+
+	ble_gap_sec_keyset_t sec_keyset = { 0 };
+	sec_keyset.keys_own.p_enc_key = &m_own_enc;
+	sec_keyset.keys_own.p_id_key = &m_own_id;
+	sec_keyset.keys_own.p_sign_key = &m_own_sign;
+	sec_keyset.keys_own.p_pk = &m_own_pk;
+	sec_keyset.keys_peer.p_enc_key = &m_peer_enc;
+	sec_keyset.keys_peer.p_id_key = &m_peer_id;
+	sec_keyset.keys_peer.p_sign_key = &m_peer_sign;
+	sec_keyset.keys_peer.p_pk = &m_peer_pk;
+	// NOTICE: to the peripheral role, given security_param as null, generate public key to keyset
+	uint32_t err_code = sd_ble_gap_sec_params_reply(
+		m_adapter, m_connection_handle, BLE_GAP_SEC_STATUS_SUCCESS, 0, &sec_keyset);
+	printf("DEBUG: on security params request, return=%d should be %d\n", err_code, NRF_SUCCESS);
+	fflush(stdout);
+}
+
 
 #pragma endregion
 
@@ -1298,13 +1378,13 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		fflush(stdout);
 		return;
 	}
+
+	uint32_t err_code = 0;
+
 	switch (p_ble_evt->header.evt_id)
 	{
 	case BLE_GAP_EVT_CONNECTED:
 		on_connected(&(p_ble_evt->evt.gap_evt));
-		if (m_on_connected != NULL) {
-			m_on_connected(p_ble_evt->evt.gap_evt.params.connected);
-		}
 		break;
 
 	case BLE_GAP_EVT_DISCONNECTED:
@@ -1313,9 +1393,9 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		fflush(stdout);
 		m_connected_devices--;
 		m_connection_handle = 0;
-		peripheral_cleanup();
+		connection_cleanup();
 		if (m_on_disconnected != NULL) {
-			m_on_disconnected(p_ble_evt->evt.gap_evt.params.disconnected);
+			m_on_disconnected(p_ble_evt->evt.gap_evt.params.disconnected.reason);
 		}
 		break;
 
@@ -1331,32 +1411,8 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 	}break;
 
 	case BLE_GAP_EVT_SEC_PARAMS_REQUEST:
-	{
-		printf("DEBUG: on security params request, peer: bond=%d io=%d min=%d max=%d ownenc=%d peerenc=%d\n",
-			p_ble_evt->evt.gap_evt.params.sec_params_request.peer_params.bond,
-			p_ble_evt->evt.gap_evt.params.sec_params_request.peer_params.io_caps,
-			p_ble_evt->evt.gap_evt.params.sec_params_request.peer_params.min_key_size,
-			p_ble_evt->evt.gap_evt.params.sec_params_request.peer_params.max_key_size,
-			p_ble_evt->evt.gap_evt.params.sec_params_request.peer_params.kdist_own.enc,
-			p_ble_evt->evt.gap_evt.params.sec_params_request.peer_params.kdist_peer.enc);
-
-		memcpy_s(m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, m_public_key, ECC_P256_PK_LEN);
-
-		ble_gap_sec_keyset_t sec_keyset = { 0 };
-		sec_keyset.keys_own.p_enc_key = &m_own_enc;
-		sec_keyset.keys_own.p_id_key = &m_own_id;
-		sec_keyset.keys_own.p_sign_key = &m_own_sign;
-		sec_keyset.keys_own.p_pk = &m_own_pk;
-		sec_keyset.keys_peer.p_enc_key = &m_peer_enc;
-		sec_keyset.keys_peer.p_id_key = &m_peer_id;
-		sec_keyset.keys_peer.p_sign_key = &m_peer_sign;
-		sec_keyset.keys_peer.p_pk = &m_peer_pk;
-		// NOTICE: to the peripheral role, given security_param as null, generate public key to keyset
-		uint32_t error_code = sd_ble_gap_sec_params_reply(
-			m_adapter, m_connection_handle, BLE_GAP_SEC_STATUS_SUCCESS, 0, &sec_keyset);
-		printf("DEBUG: on security params request, return=%d should be %d\n", error_code, NRF_SUCCESS);
-		fflush(stdout);
-	}break;
+		on_sec_params_request(&(p_ble_evt->evt.gap_evt));
+		break;
 
 	case BLE_GAP_EVT_CONN_SEC_UPDATE:
 		printf("DEBUG: on conn security updated, mode=%d level=%d\n",
@@ -1366,27 +1422,88 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		break;
 
 	case BLE_GAP_EVT_AUTH_STATUS:
+	{
 		printf("DEBUG: on auth status, status=%d, bond=%d\n",
 			p_ble_evt->evt.gap_evt.params.auth_status.auth_status,
 			p_ble_evt->evt.gap_evt.params.auth_status.bonded);
 		fflush(stdout);
-		if (p_ble_evt->evt.gap_evt.params.auth_status.auth_status == NRF_SUCCESS &&
-			p_ble_evt->evt.gap_evt.params.auth_status.bonded == 1)
+		if (p_ble_evt->evt.gap_evt.params.auth_status.auth_status == BLE_GAP_SEC_STATUS_SUCCESS &&
+			p_ble_evt->evt.gap_evt.params.auth_status.bonded == 1) {
 			m_is_authenticated = true;
-		// NOTICE: let caller decide the next, may be wait util conn param updated for service discovery
-		//         can service discovery start as next action from caller
-		if (m_on_authenticated != NULL) {
-			m_on_authenticated(p_ble_evt->evt.gap_evt.params.auth_status);
+			// NOTICE: let caller decide the next, may be wait util conn param updated for service discovery
+			//         can service discovery start as next action from caller
+			if (m_on_authenticated != NULL) {
+				m_on_authenticated(p_ble_evt->evt.gap_evt.params.auth_status.auth_status);
+			}
 		}
-		break;
+		else {
+			if (m_on_failed != NULL) {
+				std::string str = std::string("auth failed: " + 
+					std::to_string(p_ble_evt->evt.gap_evt.params.auth_status.auth_status));
+				m_on_failed(str);
+			}
+		}
+	}break;
+
+	case BLE_GAP_EVT_AUTH_KEY_REQUEST:
+	{
+		uint8_t key_type = p_ble_evt->evt.gap_evt.params.auth_key_request.key_type;
+		uint8_t *key = NULL;
+		// provide fixed passkey
+		if (key_type == BLE_GAP_AUTH_KEY_TYPE_PASSKEY) {
+			uint8_t passkey[6] = { '1','2','3','4','5','6' };
+			key = &passkey[0];
+			printf("DEBUG: generate 123456 for passkey\n");
+			fflush(stdout);
+		}
+		else if (key_type == BLE_GAP_AUTH_KEY_TYPE_OOB) {
+			//TODO: not implemented
+			printf("DEBUG: on auth key req by OOB not implemented\n");
+			fflush(stdout);
+			break;
+		}
+		err_code = sd_ble_gap_auth_key_reply(m_adapter, m_connection_handle, key_type, key);
+		printf("DEBUG: on auth key req, keytype:%d return:%d\n", key_type, err_code);
+		fflush(stdout);
+
+		if (m_on_passkey_required != NULL) {
+			std::string str = std::string((char*)key, 6);
+			m_on_passkey_required(str);
+		}
+	}break;
+
+	case BLE_GAP_EVT_PASSKEY_DISPLAY:
+	{
+		//DEBUG: asume only works in passkey type, w/o verified
+		uint8_t key[6] = { 0 };
+		memcpy_s(key, 6, p_ble_evt->evt.gap_evt.params.passkey_display.passkey, 6);
+		err_code = sd_ble_gap_auth_key_reply(m_adapter, m_connection_handle, BLE_GAP_AUTH_KEY_TYPE_PASSKEY, key);
+		printf("DEBUG: on passkey display, key: ");
+		for (int i = 0; i < 6; i++)
+			printf("%c ", key[i]);
+		printf("return:%d\n", err_code);
+		fflush(stdout);
+
+		if (m_on_passkey_required != NULL) {
+			std::string str = std::string((char*)key, 6);
+			m_on_passkey_required(str);
+		}
+	}break;
 
 	case BLE_GAP_EVT_ADV_REPORT:
 		on_adv_report(&(p_ble_evt->evt.gap_evt));
 		break;
 
 	case BLE_GAP_EVT_TIMEOUT:
+	{
 		on_timeout(&(p_ble_evt->evt.gap_evt));
-		break;
+		// NOTICE: invoke failed callback to caller, makes the next decision
+		if (m_on_failed != NULL) {
+			std::string str = std::string("timeout failed: " +
+				std::to_string(p_ble_evt->evt.gap_evt.params.timeout.src));
+			m_on_failed(str);
+		}
+	}break;
 
 	case BLE_GATTC_EVT_PRIM_SRVC_DISC_RSP:
 		on_service_discovery_response(&(p_ble_evt->evt.gattc_evt));
@@ -1450,7 +1567,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 			BLE_GAP_PHY_AUTO, /*tx_phys*/
 			BLE_GAP_PHY_AUTO, /*rx_phys*/
 		};
-		uint32_t err_code = sd_ble_gap_phy_update(m_adapter, m_connection_handle, &phys);
+		err_code = sd_ble_gap_phy_update(m_adapter, m_connection_handle, &phys);
 		if (err_code != NRF_SUCCESS)
 		{
 			printf("PHY update request reply failed, err_code %d\n", err_code);
@@ -1622,17 +1739,38 @@ static adapter_t * adapter_init(char * serial_port, uint32_t baud_rate)
 	return sd_rpc_adapter_create(transport_layer);
 }
 
+template<typename T>
+uint32_t callback_add(void * fn)
+{
+	printf("%d %s\n", typeid(T).hash_code(), typeid(T).name());
+	printf("%d %s\n", typeid(fn_on_authenticated).hash_code(), typeid(fn_on_authenticated).name());
+	if (std::is_same_v<T, fn_on_authenticated>) {
+		printf("c++11 good!\n");
+	}
+	return uint32_t();
+}
+
 uint32_t set_callback(std::string fn_name, void* fn) {
 	if (fn_name.compare("fn_on_discovered") == 0)
 		m_on_discovered = (fn_on_discovered)fn;
 	else if (fn_name.compare("fn_on_connected") == 0)
 		m_on_connected = (fn_on_connected)fn;
+	else if (fn_name.compare("fn_on_passkey_required") == 0)
+		m_on_passkey_required = (fn_on_passkey_required)fn;
 	else if (fn_name.compare("fn_on_authenticated") == 0)
 		m_on_authenticated = (fn_on_authenticated)fn;
-	else if (fn_name.compare("fn_on_srvc_discovered") == 0)
-		m_on_srvc_discovered = (fn_on_srvc_discovered)fn;
+	else if (fn_name.compare("fn_on_service_discovered") == 0)
+		m_on_service_discovered = (fn_on_service_discovered)fn;
+	else if (fn_name.compare("fn_on_service_enabled") == 0)
+		m_on_service_enabled = (fn_on_service_enabled)fn;
 	else if (fn_name.compare("fn_on_disconnected") == 0)
 		m_on_disconnected = (fn_on_disconnected)fn;
+	else if (fn_name.compare("fn_on_failed") == 0)
+		m_on_failed = (fn_on_failed)fn;
+	else if (fn_name.compare("fn_on_data_received") == 0)
+		m_on_data_received = (fn_on_data_received)fn;
+	//DEBUG: just try
+	//callback_add<fn_on_authenticated>(fn);
 
 	return 0;
 }

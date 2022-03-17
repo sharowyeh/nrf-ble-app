@@ -120,11 +120,11 @@ enum
 
 #define STRING_BUFFER_SIZE 50
 
-typedef struct
-{
-    uint8_t *     p_data;   /**< Pointer to data. */
-    uint16_t      data_len; /**< Length of data. */
-} data_t;
+//typedef struct
+//{
+//    uint8_t *     p_data;   /**< Pointer to data. */
+//    uint16_t      data_len; /**< Length of data. */
+//} data_t;
 
 
 /** Global variables */
@@ -1692,57 +1692,79 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
     }
 }
 
-uint32_t on_dev_discovered(ble_gap_evt_adv_report_t &report, std::string &addr, std::string &name)
+void on_dev_discovered(std::string &addr_str, std::string &name, addr_t &addr)
 {
-	if (addr.compare("112233445566") == 0 || 
-		addr.compare("ED156EBFA2CB") == 0)
+	if (addr_str.compare("112233445566") == 0 ||
+		addr_str.compare("ED156EBFA2CB") == 0 ||
+		addr_str.compare("D79214092F0D") == 0 ||
+		addr_str.compare("EE45D8C454B4") == 0)
 	{
 		if (m_connected_devices >= MAX_PEER_COUNT || m_connection_is_in_progress)
 		{
-			return 0;
+			return;
 		}
 
-		m_discovered_report = report;
-		conn_start(report.peer_addr);
+		//m_discovered_report = report;
+		addr_t dev_addr;
+		memcpy_s(&dev_addr, sizeof(addr_t), &addr, sizeof(addr_t));
+		conn_start(dev_addr);
 	}
-
-	return 0;
 }
 
-uint32_t on_dev_connected(ble_gap_evt_connected_t &conn)
+void on_dev_connected(addr_t &addr)
 {
+	printf("main auth start\n");
 	// NOTICE: service discovery should wait before param updated event or bond for auth secure param(or passkey)
-	bond_start(m_sec_params);
+	auth_start(true, false, 0x2);
 	// than
 	//service_discovery_start();
-	return 0;
 }
 
-uint32_t on_dev_authenticated(ble_gap_evt_auth_status_t &auth, ble_gap_evt_conn_param_update_t &conn, std::string &stage)
+void on_dev_passkey_required(std::string &passkey)
 {
+	printf("main show passkey %s\n", passkey.c_str());
+}
+
+void on_dev_authenticated(uint8_t &status)
+{
+	m_current_srvc = 0;
+	printf("main service discovery start\n");
 	service_discovery_start();
-	return 0;
 }
 
-uint32_t on_srvc_discovered(uint16_t &last_handle)
+void on_dev_service_discovered(uint16_t &last_handle)
 {
-	m_current_srvc++;
-	if (m_current_srvc < srvc_uuids.size()) {
+	if (++m_current_srvc < srvc_uuids.size()) {
+		printf("main service discovery start next\n");
 		service_discovery_start(srvc_uuids[m_current_srvc].uuid, srvc_uuids[m_current_srvc].type);
 	}
 	//TODO: start to read reference and register CCCD
 	else {
-		enable_service_start();
+		printf("main service enable start\n");
+		service_enable_start();
 	}
+}
 
-	return 0;
+void on_dev_service_enabled()
+{
+	printf("main service enabled\n");
+}
+
+void on_dev_failed(std::string &stage)
+{
+	printf("main on failed %s\n", stage.c_str());
+}
+
+void on_dev_data_received(uint16_t &handle, data_t &data)
+{
+	printf("main data received 0x%X \n", handle);
 }
 
 std::mutex mtx;
 std::condition_variable cond;
 
 // TODO: close dongle?
-uint32_t on_dev_disconnected(ble_gap_evt_disconnected_t &disconn) {
+uint32_t on_dev_disconnected(uint8_t &reason) {
 	// 0x16: close by user terminate, 0x8: close by stack timeout(power off)
 	//if (disconn.reason == 0x16) {
 		cond.notify_all();
@@ -1760,11 +1782,17 @@ uint32_t on_dev_disconnected(ble_gap_evt_disconnected_t &disconn) {
  */
 int main(int argc, char * argv[])
 {
+	//printf("%s %s\n", typeid(fn_on_authenticated).name(), typeid(fn_on_authenticated).raw_name());
+	//
 	set_callback("fn_on_discovered", &on_dev_discovered);
 	set_callback("fn_on_connected", &on_dev_connected);
+	set_callback("fn_on_passkey_required", &on_dev_passkey_required);
 	set_callback("fn_on_authenticated", &on_dev_authenticated);
-	set_callback("fn_on_srvc_discovered", &on_srvc_discovered);
+	set_callback("fn_on_service_discovered", &on_dev_service_discovered);
+	set_callback("fn_on_service_enabled", &on_dev_service_enabled);
 	set_callback("fn_on_disconnected", &on_dev_disconnected);
+	set_callback("fn_on_failed", &on_dev_failed);
+	set_callback("fn_on_data_received", &on_dev_data_received);
 
 	//// init ecc and generate keypair for later usage?
 	//ecc_init();
@@ -1827,7 +1855,7 @@ int main(int argc, char * argv[])
 		return error_code;
 	}*/
 
-	error_code = scan_start(m_scan_param);
+	error_code = scan_start(200, 50, true, 0);
 	// sd_ble_gap_scan_start()
     /*error_code = scan_start();*/
 
