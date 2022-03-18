@@ -1,6 +1,5 @@
 #pragma once
-#include "ble.h"
-#include "sd_rpc.h"
+#include <stdint.h>
 
 #define ECC_P256_SK_LEN 32 /*BLE_GAP_LESC_P256_SK_LEN*/
 #define ECC_P256_PK_LEN 64 /*BLE_GAP_LESC_P256_PK_LEN*/

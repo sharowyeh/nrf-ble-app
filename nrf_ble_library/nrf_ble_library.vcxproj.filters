@@ -13,12 +13,30 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="uECC">
+      <UniqueIdentifier>{f66fe452-2ca7-483e-87c2-9bc5f0cb663c}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="framework.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="pch.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="uECC\types.h">
+      <Filter>uECC</Filter>
+    </ClInclude>
+    <ClInclude Include="uECC\uECC.h">
+      <Filter>uECC</Filter>
+    </ClInclude>
+    <ClInclude Include="uECC\uECC_vli.h">
+      <Filter>uECC</Filter>
+    </ClInclude>
+    <ClInclude Include="dongle.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="security.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -29,5 +47,25 @@
     <ClCompile Include="pch.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="uECC\uECC.c">
+      <Filter>uECC</Filter>
+    </ClCompile>
+    <ClCompile Include="dongle.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="security.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="uECC\asm_arm.inc">
+      <Filter>uECC</Filter>
+    </None>
+    <None Include="uECC\curve-specific.inc">
+      <Filter>uECC</Filter>
+    </None>
+    <None Include="uECC\platform-specific.inc">
+      <Filter>uECC</Filter>
+    </None>
   </ItemGroup>
 </Project>

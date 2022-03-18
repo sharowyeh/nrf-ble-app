@@ -1,4 +1,6 @@
 #include "dongle.h"
+#include "ble.h"
+#include "sd_rpc.h"
 #include "security.h"
 
 #include <stdbool.h>
@@ -50,8 +52,8 @@ enum
 
 /** Global variables */
 static addr_t      m_connected_addr = { 0 }; /* intent or connected peripheral address */
-static bool        m_is_connected = false; /* m_peer_addr has been connected(BLE_GAP_EVT_DISCONNECTED) */
-static bool	       m_is_authenticated = false; /* m_peer_addr has been authenticated(BLE_GAP_EVT_AUTH_STATUS) */
+static bool        m_is_connected = false; /* peripheral address has been connected(BLE_GAP_EVT_DISCONNECTED) */
+static bool	       m_is_authenticated = false; /* peripheral address has been authenticated(BLE_GAP_EVT_AUTH_STATUS) */
 static uint8_t     m_connected_devices = 0; /* number of connected devices */
 static uint16_t    m_connection_handle = 0;
 static uint16_t    m_service_start_handle = 0;
@@ -60,19 +62,12 @@ static uint16_t    m_device_name_handle = 0;
 static uint16_t    m_battery_level_handle = 0;
 static bool        m_connection_is_in_progress = false;
 static adapter_t * m_adapter = NULL;
-//TODO: callback ptr could be multiple 
-static fn_on_discovered         m_on_discovered = NULL;
-static fn_on_connected          m_on_connected = NULL;
-static fn_on_disconnected       m_on_disconnected = NULL;
-static fn_on_passkey_required   m_on_passkey_required = NULL;
-static fn_on_authenticated      m_on_authenticated = NULL;
-static fn_on_service_discovered m_on_service_discovered = NULL;
-static fn_on_service_enabled    m_on_service_enabled = NULL;
-static fn_on_failed             m_on_failed = NULL;
-static fn_on_data_received      m_on_data_received = NULL;
+
+/* Callback functions from caller */
+static std::map<fn_callback_id_t, std::vector<void*>> m_callback_fn_list;
 
 /* Advertising addresses */
-std::map<std::string, ble_gap_evt_adv_report_t> m_adv_list; /*addr, report*/
+std::map<uint64_t, ble_gap_evt_adv_report_t> m_adv_list; /*addr, report*/
 
 /* Discovered characteristic data structure */
 typedef struct {
@@ -232,7 +227,7 @@ static void log_handler(adapter_t * adapter, sd_rpc_log_severity_t severity, con
  */
 static void ble_address_to_string_convert(ble_gap_addr_t address, uint8_t * string_buffer)
 {
-	const int address_length = 6;
+	const int address_length = BLE_GAP_ADDR_LEN;
 	char      temp_str[3] = { 0 };
 	size_t len = 0;
 	for (int i = address_length - 1; i >= 0; --i)
@@ -240,6 +235,14 @@ static void ble_address_to_string_convert(ble_gap_addr_t address, uint8_t * stri
 		sprintf_s(temp_str, sizeof(temp_str), "%02X", address.addr[i]);
 		len += sizeof(temp_str);
 		strcat_s((char *)string_buffer, len, temp_str);
+	}
+}
+
+static void ble_address_to_uint64_convert(ble_gap_addr_t address, uint64_t *number)
+{
+	for (int i = BLE_GAP_ADDR_LEN - 1; i >= 0; --i)
+	{
+		*number += (uint64_t)address.addr[i] << (i * 8);
 	}
 }
 
@@ -670,9 +673,8 @@ static uint32_t set_cccd_notification(uint16_t handle)
 	}
 
 	if (enable_next == false) {
-		// invoke callback to caller when serviec enabled
-		if (m_on_service_enabled != NULL) {
-			m_on_service_enabled();
+		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_ENABLED]) {
+			((fn_on_service_enabled)fn)();
 		}
 		//DEBUG: display saved data or do something further
 		for (int i = 0; i < m_char_list.size(); i++) {
@@ -744,8 +746,28 @@ uint32_t dongle_disconnect()
 	return error_code;
 }
 
-//TODO: close or reset dongle
+/* reset connectivity dongle
+refer to https://infocenter.nordicsemi.com/index.jsp?topic=%2Fps_nrf52840%2Fpower.html&anchor=concept_res_behav
+refer to https://infocenter.nordicsemi.com/index.jsp?topic=%2Fcom.nordic.infocenter.sdk5.v15.3.0%2Fserialization_codecs.html
+*/
+uint32_t dongle_reset() {
+	auto error_code = sd_rpc_conn_reset(m_adapter, SOFT_RESET);
+
+	if (error_code != NRF_SUCCESS)
+	{
+		printf("Failed to reset, code: 0x%02X\n", error_code);
+		fflush(stdout);
+		return error_code;
+	}
+
+	printf("Reset\n");
+	fflush(stdout);
+	return error_code;
+}
+
 uint32_t dongle_close() {
+	m_callback_fn_list.clear();
+
 	auto error_code = sd_rpc_close(m_adapter);
 
 	if (error_code != NRF_SUCCESS)
@@ -780,16 +802,18 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 	if (p_ble_gap_evt->params.adv_report.rssi < -60)
 		return;
 
-	// Log the Bluetooth device address of advertisement packet received.
-	ble_address_to_string_convert(p_ble_gap_evt->params.adv_report.peer_addr, str);
-	std::string addr = std::string((char*)str);
+	uint64_t addr_num = 0;
+	ble_address_to_uint64_convert(p_ble_gap_evt->params.adv_report.peer_addr, &addr_num);
 
 	// set flag if new arrival, and list always up-to-date
-	bool new_arrival = (m_adv_list.find(addr) == m_adv_list.end());
-	m_adv_list.insert_or_assign(addr, p_ble_gap_evt->params.adv_report);
+	bool new_arrival = (m_adv_list.find(addr_num) == m_adv_list.end());
+	m_adv_list.insert_or_assign(addr_num, p_ble_gap_evt->params.adv_report);
 
 	if (new_arrival)
 	{
+		// Log the Bluetooth device address of advertisement packet received.
+		ble_address_to_string_convert(p_ble_gap_evt->params.adv_report.peer_addr, str);
+
 		char name[256] = { 0 };
 		get_adv_name(&p_ble_gap_evt->params.adv_report, name);
 		printf("Received adv report address: 0x%s rssi:%d rsp:%d name:%s\n",
@@ -801,27 +825,21 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 			fflush(stdout);
 			return;
 		}
-		// report callback to caller
-		if (m_on_discovered != NULL) {
-			std::string str_name = std::string(name);
+
+		// invoke callback to caller with discovered report
+		if (m_callback_fn_list[FN_ON_DISCOVERED].size() > 0) {
+			std::string name_str = std::string(name);
+			std::string addr_str = std::string((char*)str);
 			addr_t report;
 			report.rssi = p_ble_gap_evt->params.adv_report.rssi;
 			report.addr_type = p_ble_gap_evt->params.adv_report.peer_addr.addr_type;
 			memcpy_s(report.addr, BLE_GAP_ADDR_LEN, p_ble_gap_evt->params.adv_report.peer_addr.addr, BLE_GAP_ADDR_LEN);
-			m_on_discovered(addr, str_name, report);
+			for (auto &fn : m_callback_fn_list[FN_ON_DISCOVERED]) {
+				((fn_on_discovered)fn)(addr_str, name_str, report);
+			}
 		}
 	}
 
-	/*if (addr.compare("112233445566") == 0)
-	{
-		if (m_connected_devices >= MAX_PEER_COUNT || m_connection_is_in_progress)
-		{
-			return;
-		}
-
-		m_discovered_report = p_ble_gap_evt->params.adv_report;
-		conn_start();
-	}*/
 #if NRF_SD_BLE_API >= 6
 	else {
 		err_code = sd_ble_gap_scan_start(m_adapter, NULL, &m_adv_report_buffer);
@@ -882,11 +900,12 @@ static void on_connected(const ble_gap_evt_t * const p_ble_gap_evt)
 	}
 	m_is_connected = match;
 
-	if (m_on_connected != NULL) {
-		m_on_connected(m_connected_addr);
+	for (auto &fn : m_callback_fn_list[FN_ON_CONNECTED]) {
+		((fn_on_connected)fn)(m_connected_addr);
 	}
-	// NOTICE: service discovery should wait before param updated event or bond for auth secure param(or passkey)
-	//bond_start();
+
+	// DEBUG: service discovery should wait before param updated event or bond for auth secure param(or passkey)
+	//auth_start();
 	// than
 	//service_discovery_start();
 }
@@ -921,12 +940,8 @@ static void on_service_discovery_response(const ble_gattc_evt_t * const p_ble_ga
 		return;
 	}
 
-	/*if (count > 1)
-	{
-		printf("Warning, discovered multiple primary services. Ignoring all but the first\n");
-	}*/
-
-	service_index = 0; /* We expect to discover only the Heart Rate service as requested. */
+	/* currently service_discovery_start only support 1 service discover in single call */
+	service_index = 0;
 	service = &(p_ble_gattc_evt->params.prim_srvc_disc_rsp.services[service_index]);
 
 	char uuid_string[STRING_BUFFER_SIZE] = { 0 };
@@ -956,8 +971,9 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
 		printf(" Characteristic discovery failed or empty, code 0x%X count=%d\n",
 			p_ble_gattc_evt->gatt_status, count);
 		fflush(stdout);
-		if (m_on_service_discovered != NULL) {
-			m_on_service_discovered(m_service_start_handle);
+		// invoke callback to caller when serviec discovery terminated
+		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_DISCOVERED]) {
+			((fn_on_service_discovered)fn)(m_service_start_handle);
 		}
 		return;
 	}
@@ -989,8 +1005,6 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
 		dev_char.handle_range.start_handle = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_decl;
 		dev_char.handle_range.end_handle = m_service_end_handle;
 		m_char_list.push_back(dev_char);
-
-		//m_chars_list.push_back(p_ble_gattc_evt->params.char_disc_rsp.chars[i]);
 	}
 	
 	// NOTICE: m_char_idx increases in on_descriptor_discovery_response
@@ -1012,8 +1026,9 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 	{
 		printf(" Descriptor discovery failed or empty, code 0x%X count=%d\n", p_ble_gattc_evt->gatt_status, count);
 		fflush(stdout);
-		if (m_on_service_discovered != NULL) {
-			m_on_service_discovered(m_service_start_handle);
+		// invoke callback to caller when serviec discovery terminated
+		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_DISCOVERED]) {
+			((fn_on_service_discovered)fn)(m_service_start_handle);
 		}
 		return;
 	}
@@ -1036,19 +1051,14 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 		ble_gattc_desc_t dev_desc = p_ble_gattc_evt->params.desc_disc_rsp.descs[i];
 		m_char_list[m_char_idx].desc_list.push_back(dev_desc);
 
-		//TODO: set cccd notification, moved to register_cccd();
+		//DEBUG: set cccd handle, refer to set_cccd_notification();
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_CCCD)
 		{
 			m_char_list[m_char_idx].cccd_handle = dev_desc.handle;
 			printf("DEBUG: CCCD descriptor saved, handle=%x\n", dev_desc.handle);
 			fflush(stdout);
-			/*if (m_hrm_cccd_handle == 0) {
-				m_hrm_cccd_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
-				printf("DEBUG: CCCD handle saved, handle=%x\n", m_hrm_cccd_handle);
-				fflush(stdout);
-			}*/
 		}
-		//TODO: report reference descriptor, moved to read_references()
+		//DEBUG: set report reference handle, refer to read_report_refs()
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_REPORT_REF_DESCR)
 		{
 			m_char_list[m_char_idx].report_ref_handle = dev_desc.handle;
@@ -1059,7 +1069,7 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_BATTERY_LEVEL_CHAR)
 		{
 			//BLE_GATT_STATUS_ATTERR_INSUF_AUTHENTICATION
-			// Authentication required, bind_start()
+			// Authentication required, auth_start()
 			//BLE_GATT_STATUS_ATTERR_WRITE_NOT_PERMITTED
 			// Cannot write hvx enabling notification messages
 			m_battery_level_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
@@ -1080,8 +1090,9 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 		descr_discovery_start(m_char_list[m_char_idx].handle_range);
 	}
 	else {
-		if (m_on_service_discovered != NULL) {
-			m_on_service_discovered(m_service_start_handle);
+		// invoke callback to caller when all characteristics discovered
+		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_DISCOVERED]) {
+			((fn_on_service_discovered)fn)(m_service_start_handle);
 		}
 	}
 
@@ -1276,11 +1287,12 @@ static void on_hvx(const ble_gattc_evt_t * const p_ble_gattc_evt)
 	printf("\n");
 	fflush(stdout);
 
-	//TODO: make a buffer or queue
+	//TODO: careful about m_hvx_data usage
 	memcpy_s(m_hvx_data.p_data, DATA_BUFFER_SIZE, p_data, len);
 	m_hvx_data.data_len = len;
-	if (m_on_data_received != NULL) {
-		m_on_data_received(hvx_handle, m_hvx_data);
+
+	for (auto &fn : m_callback_fn_list[FN_ON_DATA_RECEIVED]) {
+		((fn_on_data_received)fn)(hvx_handle, m_hvx_data);
 	}
 }
 
@@ -1394,8 +1406,9 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		m_connected_devices--;
 		m_connection_handle = 0;
 		connection_cleanup();
-		if (m_on_disconnected != NULL) {
-			m_on_disconnected(p_ble_evt->evt.gap_evt.params.disconnected.reason);
+
+		for (auto &fn : m_callback_fn_list[FN_ON_DISCONNECTED]) {
+			((fn_on_disconnected)fn)(p_ble_evt->evt.gap_evt.params.disconnected.reason);
 		}
 		break;
 
@@ -1429,18 +1442,22 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		fflush(stdout);
 		if (p_ble_evt->evt.gap_evt.params.auth_status.auth_status == BLE_GAP_SEC_STATUS_SUCCESS &&
 			p_ble_evt->evt.gap_evt.params.auth_status.bonded == 1) {
+			
 			m_is_authenticated = true;
-			// NOTICE: let caller decide the next, may be wait util conn param updated for service discovery
-			//         can service discovery start as next action from caller
-			if (m_on_authenticated != NULL) {
-				m_on_authenticated(p_ble_evt->evt.gap_evt.params.auth_status.auth_status);
+
+			// NOTICE: let caller decide the next action, can wait util conn param updated to discover service
+			//         or do immediately after authentication completed
+			for (auto &fn : m_callback_fn_list[FN_ON_AUTHENTICATED]) {
+				((fn_on_authenticated)fn)(p_ble_evt->evt.gap_evt.params.auth_status.auth_status);
 			}
 		}
 		else {
-			if (m_on_failed != NULL) {
-				std::string str = std::string("auth failed: " + 
+			if (m_callback_fn_list[FN_ON_FAILED].size() > 0) {
+				std::string str = std::string("auth failed: " +
 					std::to_string(p_ble_evt->evt.gap_evt.params.auth_status.auth_status));
-				m_on_failed(str);
+				for (auto &fn : m_callback_fn_list[FN_ON_FAILED]) {
+					((fn_on_failed)fn)(str);
+				}
 			}
 		}
 	}break;
@@ -1466,9 +1483,11 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		printf("DEBUG: on auth key req, keytype:%d return:%d\n", key_type, err_code);
 		fflush(stdout);
 
-		if (m_on_passkey_required != NULL) {
+		if (m_callback_fn_list[FN_ON_PASSKEY_REQUIRED].size() > 0) {
 			std::string str = std::string((char*)key, 6);
-			m_on_passkey_required(str);
+			for (auto &fn : m_callback_fn_list[FN_ON_PASSKEY_REQUIRED]) {
+				((fn_on_passkey_required)fn)(str);
+			}
 		}
 	}break;
 
@@ -1484,9 +1503,11 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		printf("return:%d\n", err_code);
 		fflush(stdout);
 
-		if (m_on_passkey_required != NULL) {
+		if (m_callback_fn_list[FN_ON_PASSKEY_REQUIRED].size() > 0) {
 			std::string str = std::string((char*)key, 6);
-			m_on_passkey_required(str);
+			for (auto &fn : m_callback_fn_list[FN_ON_PASSKEY_REQUIRED]) {
+				((fn_on_passkey_required)fn)(str);
+			}
 		}
 	}break;
 
@@ -1497,11 +1518,13 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 	case BLE_GAP_EVT_TIMEOUT:
 	{
 		on_timeout(&(p_ble_evt->evt.gap_evt));
-		// NOTICE: invoke failed callback to caller, makes the next decision
-		if (m_on_failed != NULL) {
+
+		if (m_callback_fn_list[FN_ON_FAILED].size() > 0) {
 			std::string str = std::string("timeout failed: " +
 				std::to_string(p_ble_evt->evt.gap_evt.params.timeout.src));
-			m_on_failed(str);
+			for (auto &fn : m_callback_fn_list[FN_ON_FAILED]) {
+				((fn_on_failed)fn)(str);
+			}
 		}
 	}break;
 
@@ -1739,45 +1762,14 @@ static adapter_t * adapter_init(char * serial_port, uint32_t baud_rate)
 	return sd_rpc_adapter_create(transport_layer);
 }
 
-template<typename T>
-uint32_t callback_add(void * fn)
-{
-	printf("%d %s\n", typeid(T).hash_code(), typeid(T).name());
-	printf("%d %s\n", typeid(fn_on_authenticated).hash_code(), typeid(fn_on_authenticated).name());
-	if (std::is_same_v<T, fn_on_authenticated>) {
-		printf("c++11 good!\n");
-	}
-	return uint32_t();
-}
-
-uint32_t set_callback(std::string fn_name, void* fn) {
-	if (fn_name.compare("fn_on_discovered") == 0)
-		m_on_discovered = (fn_on_discovered)fn;
-	else if (fn_name.compare("fn_on_connected") == 0)
-		m_on_connected = (fn_on_connected)fn;
-	else if (fn_name.compare("fn_on_passkey_required") == 0)
-		m_on_passkey_required = (fn_on_passkey_required)fn;
-	else if (fn_name.compare("fn_on_authenticated") == 0)
-		m_on_authenticated = (fn_on_authenticated)fn;
-	else if (fn_name.compare("fn_on_service_discovered") == 0)
-		m_on_service_discovered = (fn_on_service_discovered)fn;
-	else if (fn_name.compare("fn_on_service_enabled") == 0)
-		m_on_service_enabled = (fn_on_service_enabled)fn;
-	else if (fn_name.compare("fn_on_disconnected") == 0)
-		m_on_disconnected = (fn_on_disconnected)fn;
-	else if (fn_name.compare("fn_on_failed") == 0)
-		m_on_failed = (fn_on_failed)fn;
-	else if (fn_name.compare("fn_on_data_received") == 0)
-		m_on_data_received = (fn_on_data_received)fn;
-	//DEBUG: just try
-	//callback_add<fn_on_authenticated>(fn);
+uint32_t callback_add(fn_callback_id_t fn_id, void* fn) {
+	m_callback_fn_list[fn_id].push_back(fn);
 
 	return 0;
 }
 
 /* init Nordic connectiviy dongle and register event for rpc*/
 uint32_t dongle_init(char* serial_port, uint32_t baud_rate) {
-
 	// init ecc and generate keypair for later usage?
 	ecc_init();
 	ecc_p256_gen_keypair(m_private_key, m_public_key);
