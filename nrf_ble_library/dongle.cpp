@@ -11,6 +11,8 @@
 #include <map>
 #include <string>
 #include <algorithm>
+#include <condition_variable>
+#include <mutex>
 
 enum
 {
@@ -45,9 +47,6 @@ enum
 // refer to SDK https://infocenter.nordicsemi.com/index.jsp?topic=%2Fcom.nordic.infocenter.s132.api.v2.0.0%2Fgroup___b_l_e___h_c_i___s_t_a_t_u_s___c_o_d_e_s.html
 #define BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION 0x13
 #define BLE_HCI_LOCAL_HOST_TERMINATED_CONNECTION 0x16
-
-#define STRING_BUFFER_SIZE 50
-#define DATA_BUFFER_SIZE 256
 
 
 /** Global variables */
@@ -87,8 +86,12 @@ static std::vector<dev_char_t> m_char_list;
 static uint32_t m_char_idx = 0; // discover procedure index
 
 /* Data buffer for hvx */
-static data_t m_hvx_data = { 
-	(uint8_t*)calloc(STRING_BUFFER_SIZE, sizeof(uint8_t)), 0}; /*p_data, data_len*/
+static std::map <uint16_t, data_t> m_read_data; /* handle, p_data, data_len */
+/* Data buffer to write */
+static std::map<uint16_t, data_t> m_write_data; /* handle, p_data, data_len */
+
+std::mutex m_mtx;
+std::condition_variable m_cond;
 
 #if NRF_SD_BLE_API >= 5
 static uint32_t    m_config_id = 1;
@@ -673,16 +676,17 @@ static uint32_t set_cccd_notification(uint16_t handle)
 	}
 
 	if (enable_next == false) {
-		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_ENABLED]) {
-			((fn_on_service_enabled)fn)();
-		}
-		//DEBUG: display saved data or do something further
+		printf("List of characteristics with report reference data.\n");
+		fflush(stdout);
 		for (int i = 0; i < m_char_list.size(); i++) {
 			if (m_char_list[i].report_ref_is_read) {
-				printf(" Char %04X Desc %04X ref data %02x %02x\n", 
+				printf(" char:%04X desc:%04X reference data:%02x %02x\n", 
 					m_char_list[i].handle, m_char_list[i].report_ref_handle, 
 					m_char_list[i].report_ref[0], m_char_list[i].report_ref[1]);
 			}
+		}
+		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_ENABLED]) {
+			((fn_on_service_enabled)fn)();
 		}
 	}
 
@@ -692,6 +696,8 @@ static uint32_t set_cccd_notification(uint16_t handle)
 /*
 read hid report reference data from m_char_list(or handle in its desc_list),
 reading behavior works with on_read_response()
+reference data definition: report_id, report_type are defined by FW
+  refer to https://infocenter.nordicsemi.com/index.jsp?topic=%2Fcom.nordic.infocenter.sdk5.v15.3.0%2Fstructble__srv__report__ref__t.html
 */
 static uint32_t read_report_refs(uint16_t handle)
 {
@@ -735,6 +741,112 @@ uint32_t service_enable_start() {
 	read_report_refs(0);
 
 	return 0;
+}
+
+EXTERNC NRFBLEAPI uint32_t data_read(uint16_t handle, data_t * data)
+{
+	if (data == 0)
+		return NRF_ERROR_INVALID_PARAM;
+	if (m_read_data[handle].data_len == 0)
+		return NRF_ERROR_NOT_FOUND;
+	
+	uint32_t error_code = 0;
+	error_code = sd_ble_gattc_read(
+		m_adapter,
+		m_connection_handle,
+		handle, 0
+	);
+	printf(" Read value from handle:0x%04X code:%d\n", handle, error_code);
+	fflush(stdout);
+	if (error_code != NRF_SUCCESS) {
+		return error_code;
+	}
+
+	std::unique_lock<std::mutex> lck{ m_mtx };
+	auto stat = m_cond.wait_for(lck, std::chrono::milliseconds(2000));
+	if (stat == std::cv_status::timeout) {
+		return NRF_ERROR_TIMEOUT;
+	}
+
+	memcpy_s(data->p_data, data->data_len, m_read_data[handle].p_data, m_read_data[handle].data_len);
+	data->data_len = m_read_data[handle].data_len;
+
+	return NRF_SUCCESS;
+}
+
+EXTERNC NRFBLEAPI uint32_t data_read_by_report_ref(uint8_t *report_ref, data_t *data)
+{
+	uint16_t handle = 0;
+	for (auto it = m_char_list.begin(); it != m_char_list.end(); it++) {
+		if (it->report_ref_handle == 0 || it->report_ref_is_read == false)
+			continue;
+		if (it->report_ref[0] == report_ref[0] && it->report_ref[1] == report_ref[1]) {
+			handle = it->handle;
+			break;
+		}
+	}
+	if (handle == 0) {
+		return NRF_ERROR_NOT_FOUND;
+	}
+	printf(" Read value handle found: 0x%04X ref:", handle);
+	fflush(stdout);
+	print_byte_string((char *)(report_ref), 2);
+	printf("\n");
+	fflush(stdout);
+	return data_read(handle, data);
+}
+
+EXTERNC NRFBLEAPI uint32_t data_write(uint16_t handle, data_t data)
+{
+	if (m_write_data[handle].data_len == 0)
+		m_write_data[handle].p_data = (uint8_t*)calloc(DATA_BUFFER_SIZE, sizeof(uint8_t));
+
+	memcpy_s(m_write_data[handle].p_data, DATA_BUFFER_SIZE, data.p_data, data.data_len);
+	m_write_data[handle].data_len = data.data_len;
+
+	ble_gattc_write_params_t write_params;
+	write_params.handle = handle;
+	write_params.len = m_write_data[handle].data_len;
+	write_params.p_value = m_write_data[handle].p_data;
+	write_params.write_op = BLE_GATT_OP_WRITE_REQ;
+	write_params.offset = 0;
+	uint32_t error_code = 0;
+	error_code = sd_ble_gattc_write(m_adapter, m_connection_handle, &write_params);
+	printf(" Write value to handle:0x%04X code:%d\n", handle, error_code);
+	fflush(stdout);
+	if (error_code != NRF_SUCCESS) {
+		return error_code;
+	}
+
+	std::unique_lock<std::mutex> lck{ m_mtx };
+	auto stat = m_cond.wait_for(lck, std::chrono::milliseconds(2000));
+	if (stat == std::cv_status::timeout) {
+		return NRF_ERROR_TIMEOUT;
+	}
+	//DEBUG: check write data?
+	return NRF_SUCCESS;
+}
+
+EXTERNC NRFBLEAPI uint32_t data_write_by_report_ref(uint8_t *report_ref, data_t data)
+{
+	uint16_t handle = 0;
+	for (auto it = m_char_list.begin(); it != m_char_list.end(); it++) {
+		if (it->report_ref_handle == 0 || it->report_ref_is_read == false)
+			continue;
+		if (it->report_ref[0] == report_ref[0] && it->report_ref[1] == report_ref[1]) {
+			handle = it->handle;
+			break;
+		}
+	}
+	if (handle == 0) {
+		return NRF_ERROR_NOT_FOUND;
+	}
+	printf(" Write value handle found: 0x%04X ref:", handle);
+	fflush(stdout);
+	print_byte_string((char *)(report_ref), 2);
+	printf("\n");
+	fflush(stdout);
+	return data_write(handle, data);
 }
 
 /* disconnect action will response status BLE_HCI_LOCAL_HOST_TERMINATED_CONNECTION from BLE_GAP_EVT_DISCONNECTED */
@@ -1000,11 +1112,17 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
 				p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_decl - 1;
 		}
 		dev_char_t dev_char;
+		// NOTICE: only care the value handle for further usage
 		dev_char.handle = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value;
 		dev_char.uuid = p_ble_gattc_evt->params.char_disc_rsp.chars[i].uuid.uuid;
 		dev_char.handle_range.start_handle = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_decl;
 		dev_char.handle_range.end_handle = m_service_end_handle;
 		m_char_list.push_back(dev_char);
+
+		// pre-allocate for read data, reduce effort on_hvx
+		auto handle_value = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value;
+		if (m_read_data[handle_value].p_data == nullptr)
+			m_read_data[handle_value].p_data = (uint8_t*)calloc(DATA_BUFFER_SIZE, sizeof(uint8_t));
 	}
 	
 	// NOTICE: m_char_idx increases in on_descriptor_discovery_response
@@ -1036,6 +1154,7 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 	printf(" Received descriptor discovery response, descriptor count: %d\n", count);
 	fflush(stdout);
 
+	uint16_t last_handle = 0;
 	char uuid_string[STRING_BUFFER_SIZE] = { 0 };
 	for (int i = 0; i < count; i++)
 	{
@@ -1083,11 +1202,17 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 			printf("DEBUG: Device name handle saved\n");
 			fflush(stdout);
 		}
+
+		m_service_start_handle = std::max(m_service_start_handle, p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle);
 	}
 
 	if (++m_char_idx < m_char_list.size()) {
 		// move next characteristic
 		descr_discovery_start(m_char_list[m_char_idx].handle_range);
+	}
+	else if (last_handle < m_service_end_handle) {
+		ble_gattc_handle_range_t range{ m_service_start_handle, m_service_end_handle };
+		char_discovery_start(range);
 	}
 	else {
 		// invoke callback to caller when all characteristics discovered
@@ -1169,20 +1294,16 @@ static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 	printf("Received read response handle:0x%04X ", rsp_handle);
 	fflush(stdout);
 
-	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS)
+	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS || 
+		p_ble_gattc_evt->params.read_rsp.len == 0)
 	{
 		// refer to BLE_GATT_STATUS_ATTERR_INSUF_AUTHENTICATION if handle access required authentication
 		// refer to BLE_GATT_STATUS_ATTERR_REQUEST_NOT_SUPPORTED if handle property not permitted
-		printf("Error read operation, error code 0x%x\n", p_ble_gattc_evt->gatt_status);
+		printf("Read operation failed or data empty, error code 0x%x\n", p_ble_gattc_evt->gatt_status);
 		fflush(stdout);
 		//TODO: do something next if any error occurred
-		return;
-	}
 
-	if (p_ble_gattc_evt->params.read_rsp.len == 0) {
-		printf("Error read operation, no data length\n");
-		fflush(stdout);
-		//TODO: do something next if any error occurred
+		m_cond.notify_all();
 		return;
 	}
 
@@ -1196,6 +1317,14 @@ static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 	print_byte_string(read_bytes, len);
 	printf("\n");
 	fflush(stdout);
+
+	// NOTICE: refer to on_characteristic_discovery_response has pre-allocated memory
+	if (m_read_data[rsp_handle].p_data == nullptr)
+		m_read_data[rsp_handle].p_data = (uint8_t*)calloc(DATA_BUFFER_SIZE, sizeof(uint8_t));
+	memcpy_s(m_read_data[rsp_handle].p_data, DATA_BUFFER_SIZE, p_data, len);
+	m_read_data[rsp_handle].data_len = len;
+	// release lock for data_read()
+	m_cond.notify_all();
 
 	// check handle is report reference descriptor, to read the next report reference.
 	//ASSERT: rsp_handle == m_char_list[m_char_idx].report_ref_handle
@@ -1225,8 +1354,21 @@ static void on_write_response(const ble_gattc_evt_t * const p_ble_gattc_evt)
 	{
 		printf("Error. Write operation failed. Error code 0x%X\n", p_ble_gattc_evt->gatt_status);
 		fflush(stdout);
+		m_cond.notify_all();
 		return;
 	}
+
+	uint8_t* p_data = (uint8_t *)p_ble_gattc_evt->params.write_rsp.data;
+	uint16_t offset = p_ble_gattc_evt->params.write_rsp.offset;
+	uint16_t len = p_ble_gattc_evt->params.write_rsp.len;
+
+	// NOTICE: refer to on_characteristic_discovery_response has pre-allocated memory
+	if (m_write_data[rsp_handle].p_data == nullptr)
+		m_write_data[rsp_handle].p_data = (uint8_t*)calloc(DATA_BUFFER_SIZE, sizeof(uint8_t));
+	memcpy_s(m_write_data[rsp_handle].p_data, DATA_BUFFER_SIZE, p_data + offset, len);
+	m_write_data[rsp_handle].data_len = len;
+	// release lock for data_write()
+	m_cond.notify_all();
 
 	// check handle is CCCD, to set the next CCCD notification.
 	//ASSERT: rsp_handle == m_char_list[m_char_idx].cccd_handle
@@ -1287,12 +1429,14 @@ static void on_hvx(const ble_gattc_evt_t * const p_ble_gattc_evt)
 	printf("\n");
 	fflush(stdout);
 
-	//TODO: careful about m_hvx_data usage
-	memcpy_s(m_hvx_data.p_data, DATA_BUFFER_SIZE, p_data, len);
-	m_hvx_data.data_len = len;
+	// NOTICE: refer to on_characteristic_discovery_response has pre-allocated memory
+	if (m_read_data[hvx_handle].p_data == nullptr)
+		m_read_data[hvx_handle].p_data = (uint8_t*)calloc(DATA_BUFFER_SIZE, sizeof(uint8_t));
+	memcpy_s(m_read_data[hvx_handle].p_data, DATA_BUFFER_SIZE, p_data, len);
+	m_read_data[hvx_handle].data_len = len;
 
 	for (auto &fn : m_callback_fn_list[FN_ON_DATA_RECEIVED]) {
-		((fn_on_data_received)fn)(hvx_handle, m_hvx_data);
+		((fn_on_data_received)fn)(hvx_handle, m_read_data[hvx_handle]);
 	}
 }
 

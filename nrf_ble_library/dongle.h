@@ -11,19 +11,23 @@
 #define EXTERNC extern
 #endif
 
+#define STRING_BUFFER_SIZE 50
+#define DATA_BUFFER_SIZE 256
+
 #include <string>
 
 typedef struct
 {
-	uint8_t addr_type : 7;       /**< See @ref BLE_GAP_ADDR_TYPES. */
+	uint8_t addr_type : 7;       /**< See @ref BLE_GAP_ADDR_TYPES. default 7 from ble_gap_addr_t */
 	uint8_t addr[6/*BLE_GAP_ADDR_LEN*/]; /**< 48-bit address, LSB format. */
 	int8_t  rssi;  /**< Received Signal Strength Indication in dBm. */
 } addr_t;
 
+/* see also ble_data_t but fixed data memory allocation for ease of init */
 typedef struct
 {
-	uint8_t *     p_data;   /**< Pointer to data. */
-	uint16_t      data_len; /**< Length of data. */
+	uint8_t  *p_data;   /**< Pointer to data. */
+	uint16_t data_len; /**< Length of data. */
 } data_t;
 
 typedef enum {
@@ -61,6 +65,12 @@ EXTERNC NRFBLEAPI uint32_t conn_start(addr_t peer_addr);
 EXTERNC NRFBLEAPI uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps);
 EXTERNC NRFBLEAPI uint32_t service_discovery_start(uint16_t uuid, uint8_t type);
 EXTERNC NRFBLEAPI uint32_t service_enable_start();
+EXTERNC NRFBLEAPI uint32_t data_read(uint16_t handle, data_t *data);
+/*overload for data_read(handle, *data)*/
+EXTERNC NRFBLEAPI uint32_t data_read_by_report_ref(uint8_t *report_ref, data_t *data);
+EXTERNC NRFBLEAPI uint32_t data_write(uint16_t handle, data_t data);
+/*overload for data_write(handle, *data)*/
+EXTERNC NRFBLEAPI uint32_t data_write_by_report_ref(uint8_t *report_ref, data_t data);
 EXTERNC NRFBLEAPI uint32_t dongle_disconnect();
 EXTERNC NRFBLEAPI uint32_t dongle_reset();
 EXTERNC NRFBLEAPI uint32_t dongle_close();

@@ -1,4 +1,5 @@
 #include <string>
+#include <iostream>
 #include <vector>
 #include <condition_variable>
 #include <mutex>
@@ -6,21 +7,24 @@
 #include "dongle.h"
 
 bool discovered = false;
+// argv[3]
+std::string target_addr = "0";
+// argv[4], default no limitation(any dBm greater than -128)
+int8_t target_rssi = INT8_MIN;
 
 void on_dev_discovered(std::string addr_str, std::string name, addr_t addr)
 {
-	printf("[main] discovered address %s\n", addr_str.c_str());
-	if (addr_str.compare("112233445566") == 0 ||
-		addr_str.compare("ED156EBFA2CB") == 0 ||
-		addr_str.compare("D79214092F0D") == 0 ||
-		addr_str.compare("EE45D8C454B4") == 0)
-	{
-		if (discovered)
-			return;
-		else
-			discovered = true;
+	printf("[main] discovered address %s and rssi %d\n", addr_str.c_str(), addr.rssi);
 
-		printf("[main] connect start\n");
+	if (discovered)
+		return;
+	if (addr.rssi < target_rssi)
+		return;
+	if (target_addr.length() == 12 && addr_str.compare(target_addr) == 0)
+	{
+		discovered = true;
+
+		printf("[main] requirement match, connect start\n");
 		conn_start(addr);
 	}
 }
@@ -74,6 +78,11 @@ void on_dev_service_discovered(uint16_t last_handle)
 void on_dev_service_enabled()
 {
 	printf("[main] service enabled\n");
+	fflush(stdout);
+	printf("[main] === ready to inteact via report characteristic(use hex) ===\n");
+	printf("[main] input \"write xx xx yy yy yy..\" write data to target, which xx is report reference, yy is payload data\n");
+	printf("[main] input \"read xx xx\" read data from target, which xx is report reference data\n");
+	fflush(stdout);
 }
 
 void on_dev_failed(std::string stage)
@@ -102,6 +111,66 @@ uint32_t on_dev_disconnected(uint8_t reason) {
 	return 0;
 }
 
+std::vector<std::string> split(std::string str, std::string delimiter) {
+	std::vector<std::string> result;
+	size_t pos = 0;
+	while (pos <= str.size()) {
+		auto token = str.substr(pos, str.find(delimiter, pos) - pos);
+		result.push_back(token);
+		pos += token.length() + delimiter.length();
+	}
+	return result;
+}
+
+void parse_write_command(std::vector<std::string> split_cmd) {
+	auto data_len = split_cmd.size() - 3;
+	if (data_len <= 0) {
+		return;
+	}
+	uint8_t ref[2] = { 0 };
+	ref[0] = strtoul(split_cmd[1].c_str(), nullptr, 16);
+	ref[1] = strtoul(split_cmd[2].c_str(), nullptr, 16);
+	data_t data = { 0 };
+	data.p_data = (uint8_t*)calloc(data_len, sizeof(uint8_t));
+	for (int i = 0; i < data_len; i++) {
+		data.p_data[i] = strtoul(split_cmd[i + 3].c_str(), nullptr, 16);
+	}
+	data.data_len = data_len;
+
+	uint32_t err = data_write_by_report_ref(ref, data);
+	printf("[main] write data, code:%d\n", err);
+	fflush(stdout);
+}
+
+void parse_read_command(std::vector<std::string> split_cmd) {
+	if (split_cmd.size() < 3) {
+		return;
+	}
+	uint8_t ref[2] = { 0 };
+	ref[0] = strtoul(split_cmd[1].c_str(), nullptr, 16);
+	ref[1] = strtoul(split_cmd[2].c_str(), nullptr, 16);
+	data_t data = { 0 };
+	data.p_data = (uint8_t*)calloc(DATA_BUFFER_SIZE, sizeof(uint8_t));
+	data.data_len = DATA_BUFFER_SIZE;
+
+	uint32_t err = data_read_by_report_ref(ref, &data);
+	printf("[main] read data, code:%d data:", err);
+	for (int i = 0; i < data.data_len; i++) {
+		printf("%02x ", data.p_data[i]);
+	}
+	printf("\n");
+}
+
+void parse_input_command(std::string &line) {
+	auto sp = split(line, " ");
+	if (sp[0].compare("write") == 0) {
+		parse_write_command(sp);
+	}
+	else if (sp[0].compare("read") == 0) {
+		parse_read_command(sp);
+	}
+}
+
 int main(int argc, char * argv[])
 {	
 	callback_add(FN_ON_DISCOVERED, &on_dev_discovered);
@@ -117,12 +186,20 @@ int main(int argc, char * argv[])
 	uint32_t error_code;
 	char     serial_port[10] = "COM3";
 	uint32_t baud_rate = 10000;
-	uint8_t  cccd_value = 0;
 
+	// given serial port string
 	if (argc > 1)
-	{
 		strcpy_s(serial_port, argv[1]);
-	}
+	// given baud rate
+	if (argc > 2)
+		baud_rate = atoi(argv[2]);
+	// given address hex string(upper case) for peripheral connection
+	if (argc > 3)
+		target_addr = std::string(argv[3]);
+	// given rssi limitation for peripheral connection
+	if (argc > 4)
+		target_rssi = atoi(argv[4]);
+
 
 	error_code = dongle_init(serial_port, baud_rate);
 
@@ -136,8 +213,11 @@ int main(int argc, char * argv[])
 	// Endlessly loop.
 	for (;;)
 	{
-		char c = (char)getchar();
-		if (c == 'q' || c == 'Q')
+		std::string line;
+		std::getline(std::cin, line);
+		//char c = (char)getchar();
+		//if (c == 'q' || c == 'Q')
+		if (line.compare("q") == 0 || line.compare("Q") == 0)
 		{
 			auto err = dongle_disconnect();
 			// if success, wait until dongle_disconnect() finished;
@@ -150,7 +230,8 @@ int main(int argc, char * argv[])
 
 			return 0;
 		}
-
+		
+		parse_input_command(line);
 	}
 }
 

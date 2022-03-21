@@ -98,7 +98,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
       <AdditionalLibraryDirectories>$(SolutionDir)..\nrf-ble-driver-4.1.2-win_x86_64\lib;$(SolutionDir)..\pc-ble-driver\build\Debug;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>nrf-ble-driver-sd_api_v5-mt-4_1_2.lib;nrf-ble-driver-sd_api_v5-mt-gd-0_0_0.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>nrf-ble-driver-sd_api_v5-mt-4_1_2.lib;nrf-ble-driver-sd_api_v5-mt-static-gd-0_0_0.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
