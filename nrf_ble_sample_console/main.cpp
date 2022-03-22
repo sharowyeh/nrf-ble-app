@@ -12,24 +12,24 @@ std::string target_addr = "0";
 // argv[4], default no limitation(any dBm greater than -128)
 int8_t target_rssi = INT8_MIN;
 
-void on_dev_discovered(std::string addr_str, std::string name, addr_t addr)
+void on_dev_discovered(const char *addr_str, const char *name, uint8_t addr_type, uint8_t *addr, int8_t rssi)
 {
-	printf("[main] discovered address %s and rssi %d\n", addr_str.c_str(), addr.rssi);
+	printf("[main] discovered address %s and rssi %d\n", addr_str, rssi);
 
 	if (discovered)
 		return;
-	if (addr.rssi < target_rssi)
+	if (rssi < target_rssi)
 		return;
-	if (target_addr.length() == 12 && addr_str.compare(target_addr) == 0)
+	if (target_addr.length() == 12 && std::string(addr_str).compare(target_addr) == 0)
 	{
 		scan_stop();
 		discovered = true;
 		printf("[main] requirement match, connect start\n");
-		conn_start(addr);
+		conn_start(addr_type, addr);
 	}
 }
 
-void on_dev_connected(addr_t addr)
+void on_dev_connected(uint8_t addr_type, uint8_t *addr)
 {
 	printf("[main] auth start\n");
 	// NOTICE: service discovery should wait before param updated event or bond for auth secure param(or passkey)
@@ -38,9 +38,9 @@ void on_dev_connected(addr_t addr)
 	//service_discovery_start();
 }
 
-void on_dev_passkey_required(std::string passkey)
+void on_dev_passkey_required(const char *passkey)
 {
-	printf("[main] show passkey %s\n", passkey.c_str());
+	printf("[main] show passkey %s\n", passkey);
 }
 
 typedef struct {
@@ -85,20 +85,6 @@ void on_dev_service_enabled()
 	fflush(stdout);
 }
 
-void on_dev_failed(std::string stage)
-{
-	printf("[main] on failed %s\n", stage.c_str());
-}
-
-void on_dev_data_received(uint16_t handle, data_t data)
-{
-	printf("[main] data received 0x%X ", handle);
-	for (int i = 0; i < data.data_len; i++) {
-		printf("%02x ", (unsigned char)data.p_data[i]);
-	}
-	printf("\n");
-}
-
 std::mutex mtx;
 std::condition_variable cond;
 
@@ -108,6 +94,25 @@ uint32_t on_dev_disconnected(uint8_t reason) {
 	discovered = false;
 	cond.notify_all();
 	return reason;
+}
+
+void on_dev_failed(const char *stage)
+{
+	printf("[main] on failed %s\n", stage);
+}
+
+void on_dev_data_received(uint16_t handle, uint8_t *data, uint16_t len)
+{
+	printf("[main] data received 0x%X ", handle);
+	for (int i = 0; i < len; i++) {
+		printf("%02x ", (unsigned char)data[i]);
+	}
+	printf("\n");
+}
+
+void on_dev_data_sent(uint16_t handle, uint8_t *data, uint16_t len)
+{
+	printf("[main] data sent 0x%X", handle);
 }
 
 std::vector<std::string> split(std::string str, std::string delimiter) {
@@ -129,14 +134,12 @@ void parse_write_command(std::vector<std::string> split_cmd) {
 	uint8_t ref[2] = { 0 };
 	ref[0] = strtoul(split_cmd[1].c_str(), nullptr, 16);
 	ref[1] = strtoul(split_cmd[2].c_str(), nullptr, 16);
-	data_t data = { 0 };
-	data.p_data = (uint8_t*)calloc(data_len, sizeof(uint8_t));
+	uint8_t data[DATA_BUFFER_SIZE] = { 0 };
 	for (int i = 0; i < data_len; i++) {
-		data.p_data[i] = strtoul(split_cmd[i + 3].c_str(), nullptr, 16);
+		data[i] = strtoul(split_cmd[i + 3].c_str(), nullptr, 16);
 	}
-	data.data_len = data_len;
 
-	uint32_t err = data_write_by_report_ref(ref, data);
+	uint32_t err = data_write_by_report_ref(ref, data, data_len);
 	printf("[main] write data, code:%d\n", err);
 	fflush(stdout);
 }
@@ -148,14 +151,13 @@ void parse_read_command(std::vector<std::string> split_cmd) {
 	uint8_t ref[2] = { 0 };
 	ref[0] = strtoul(split_cmd[1].c_str(), nullptr, 16);
 	ref[1] = strtoul(split_cmd[2].c_str(), nullptr, 16);
-	data_t data = { 0 };
-	data.p_data = (uint8_t*)calloc(DATA_BUFFER_SIZE, sizeof(uint8_t));
-	data.data_len = DATA_BUFFER_SIZE;
+	uint8_t data[DATA_BUFFER_SIZE] = { 0 };
+	uint16_t data_len = DATA_BUFFER_SIZE;
 
-	uint32_t err = data_read_by_report_ref(ref, &data);
+	uint32_t err = data_read_by_report_ref(ref, &data[0], &data_len);
 	printf("[main] read data, code:%d data:", err);
-	for (int i = 0; i < data.data_len; i++) {
-		printf("%02x ", data.p_data[i]);
+	for (int i = 0; i < data_len; i++) {
+		printf("%02x ", data[i]);
 	}
 	printf("\n");
 }

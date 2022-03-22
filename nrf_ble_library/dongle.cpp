@@ -14,6 +14,20 @@
 #include <condition_variable>
 #include <mutex>
 
+typedef struct
+{
+	uint8_t addr_type : 7;       /**< See @ref BLE_GAP_ADDR_TYPES. default 7 from ble_gap_addr_t */
+	uint8_t addr[6/*BLE_GAP_ADDR_LEN*/]; /**< 48-bit address, LSB format. */
+	int8_t  rssi;  /**< Received Signal Strength Indication in dBm. */
+} addr_t;
+
+/* see also ble_data_t but fixed data memory allocation for ease of init */
+typedef struct
+{
+	uint8_t  *p_data;   /**< Pointer to data. */
+	uint16_t data_len; /**< Length of data. */
+} data_t;
+
 enum
 {
 	UNIT_0_625_MS = 625,  /**< Number of microseconds in 0.625 milliseconds. */
@@ -50,7 +64,7 @@ enum
 
 
 /** Global variables */
-static addr_t      m_connected_addr = { 0 }; /* intent or connected peripheral address */
+static ble_gap_addr_t  m_connected_addr = { 0 }; /* intent or connected peripheral address */
 static bool        m_is_connected = false; /* peripheral address has been connected(BLE_GAP_EVT_DISCONNECTED) */
 static bool	       m_is_authenticated = false; /* peripheral address has been authenticated(BLE_GAP_EVT_AUTH_STATUS) */
 static uint8_t     m_connected_devices = 0; /* number of connected devices */
@@ -490,16 +504,14 @@ uint32_t scan_stop() {
 	return error_code;
 }
 
-uint32_t conn_start(addr_t peer_addr)
+uint32_t conn_start(uint8_t addr_type, uint8_t addr[6])
 {
 	// cleanup previous data
 	connection_cleanup();
 
-	ble_gap_addr_t addr;
-	addr.addr_id_peer = 1;
-	addr.addr_type = peer_addr.addr_type;
-	memcpy_s(addr.addr, BLE_GAP_ADDR_LEN, peer_addr.addr, BLE_GAP_ADDR_LEN);
-	memcpy_s(&m_connected_addr, sizeof(addr_t), &peer_addr, sizeof(addr_t));
+	m_connected_addr.addr_id_peer = 1;
+	m_connected_addr.addr_type = addr_type;
+	memcpy_s(&(m_connected_addr.addr[0]), BLE_GAP_ADDR_LEN, &addr[0], BLE_GAP_ADDR_LEN);
 
 	m_connection_param.min_conn_interval = MIN_CONNECTION_INTERVAL;
 	m_connection_param.max_conn_interval = MAX_CONNECTION_INTERVAL;
@@ -513,7 +525,7 @@ uint32_t conn_start(addr_t peer_addr)
 
 	uint32_t err_code;
 	err_code = sd_ble_gap_connect(m_adapter,
-		&(addr),
+		&(m_connected_addr),
 		&m_scan_param,
 		&m_connection_param
 #if NRF_SD_BLE_API >= 5
@@ -758,7 +770,7 @@ uint32_t service_enable_start() {
 	return 0;
 }
 
-EXTERNC NRFBLEAPI uint32_t data_read(uint16_t handle, data_t * data)
+uint32_t data_read(uint16_t handle, uint8_t *data, uint16_t *len)
 {
 	if (data == 0)
 		return NRF_ERROR_INVALID_PARAM;
@@ -783,13 +795,13 @@ EXTERNC NRFBLEAPI uint32_t data_read(uint16_t handle, data_t * data)
 		return NRF_ERROR_TIMEOUT;
 	}
 
-	memcpy_s(data->p_data, data->data_len, m_read_data[handle].p_data, m_read_data[handle].data_len);
-	data->data_len = m_read_data[handle].data_len;
+	memcpy_s(data, *len, m_read_data[handle].p_data, m_read_data[handle].data_len);
+	*len = std::min(*len, m_read_data[handle].data_len);
 
 	return NRF_SUCCESS;
 }
 
-EXTERNC NRFBLEAPI uint32_t data_read_by_report_ref(uint8_t *report_ref, data_t *data)
+uint32_t data_read_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t *len)
 {
 	uint16_t handle = 0;
 	for (auto it = m_char_list.begin(); it != m_char_list.end(); it++) {
@@ -808,16 +820,16 @@ EXTERNC NRFBLEAPI uint32_t data_read_by_report_ref(uint8_t *report_ref, data_t *
 	print_byte_string((char *)(report_ref), 2);
 	printf("\n");
 	fflush(stdout);
-	return data_read(handle, data);
+	return data_read(handle, data, len);
 }
 
-EXTERNC NRFBLEAPI uint32_t data_write(uint16_t handle, data_t data)
+uint32_t data_write(uint16_t handle, uint8_t *data, uint16_t len)
 {
 	if (m_write_data[handle].data_len == 0)
 		m_write_data[handle].p_data = (uint8_t*)calloc(DATA_BUFFER_SIZE, sizeof(uint8_t));
 
-	memcpy_s(m_write_data[handle].p_data, DATA_BUFFER_SIZE, data.p_data, data.data_len);
-	m_write_data[handle].data_len = data.data_len;
+	memcpy_s(m_write_data[handle].p_data, DATA_BUFFER_SIZE, data, len);
+	m_write_data[handle].data_len = len;
 
 	ble_gattc_write_params_t write_params;
 	write_params.handle = handle;
@@ -842,7 +854,7 @@ EXTERNC NRFBLEAPI uint32_t data_write(uint16_t handle, data_t data)
 	return NRF_SUCCESS;
 }
 
-EXTERNC NRFBLEAPI uint32_t data_write_by_report_ref(uint8_t *report_ref, data_t data)
+uint32_t data_write_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t len)
 {
 	uint16_t handle = 0;
 	for (auto it = m_char_list.begin(); it != m_char_list.end(); it++) {
@@ -861,7 +873,7 @@ EXTERNC NRFBLEAPI uint32_t data_write_by_report_ref(uint8_t *report_ref, data_t 
 	print_byte_string((char *)(report_ref), 2);
 	printf("\n");
 	fflush(stdout);
-	return data_write(handle, data);
+	return data_write(handle, data, len);
 }
 
 /* disconnect action will response status BLE_HCI_LOCAL_HOST_TERMINATED_CONNECTION from BLE_GAP_EVT_DISCONNECTED */
@@ -943,8 +955,10 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 
 		char name[256] = { 0 };
 		get_adv_name(&p_ble_gap_evt->params.adv_report, name);
-		printf("Received adv report address: 0x%s rssi:%d rsp:%d name:%s\n",
-			str, p_ble_gap_evt->params.adv_report.rssi, p_ble_gap_evt->params.adv_report.scan_rsp, name);
+		printf("Received adv report address: 0x%s rssi:%d type:%d rsp:%d name:%s\n",
+			str, p_ble_gap_evt->params.adv_report.rssi,
+			p_ble_gap_evt->params.adv_report.type,
+			p_ble_gap_evt->params.adv_report.scan_rsp, name);
 		fflush(stdout);
 
 		if (m_connection_is_in_progress) {
@@ -960,9 +974,10 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 			addr_t report;
 			report.rssi = p_ble_gap_evt->params.adv_report.rssi;
 			report.addr_type = p_ble_gap_evt->params.adv_report.peer_addr.addr_type;
-			memcpy_s(report.addr, BLE_GAP_ADDR_LEN, p_ble_gap_evt->params.adv_report.peer_addr.addr, BLE_GAP_ADDR_LEN);
+			memcpy_s(&(report.addr[0]), BLE_GAP_ADDR_LEN, 
+				&(p_ble_gap_evt->params.adv_report.peer_addr.addr[0]), BLE_GAP_ADDR_LEN);
 			for (auto &fn : m_callback_fn_list[FN_ON_DISCOVERED]) {
-				((fn_on_discovered)fn)(addr_str, name_str, report);
+				((fn_on_discovered)fn)(addr_str.c_str(), name_str.c_str(), report.addr_type, report.addr, report.rssi);
 			}
 		}
 	}
@@ -1028,7 +1043,7 @@ static void on_connected(const ble_gap_evt_t * const p_ble_gap_evt)
 	m_is_connected = match;
 
 	for (auto &fn : m_callback_fn_list[FN_ON_CONNECTED]) {
-		((fn_on_connected)fn)(m_connected_addr);
+		((fn_on_connected)fn)(m_connected_addr.addr_type, m_connected_addr.addr);
 	}
 
 	// DEBUG: service discovery should wait before param updated event or bond for auth secure param(or passkey)
@@ -1470,7 +1485,7 @@ static void on_hvx(const ble_gattc_evt_t * const p_ble_gattc_evt)
 	m_read_data[hvx_handle].data_len = len;
 
 	for (auto &fn : m_callback_fn_list[FN_ON_DATA_RECEIVED]) {
-		((fn_on_data_received)fn)(hvx_handle, m_read_data[hvx_handle]);
+		((fn_on_data_received)fn)(hvx_handle, m_read_data[hvx_handle].p_data, m_read_data[hvx_handle].data_len);
 	}
 }
 
@@ -1625,7 +1640,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 				std::string str = std::string("auth failed: " +
 					std::to_string(p_ble_evt->evt.gap_evt.params.auth_status.auth_status));
 				for (auto &fn : m_callback_fn_list[FN_ON_FAILED]) {
-					((fn_on_failed)fn)(str);
+					((fn_on_failed)fn)(str.c_str());
 				}
 			}
 		}
@@ -1655,7 +1670,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		if (m_callback_fn_list[FN_ON_PASSKEY_REQUIRED].size() > 0) {
 			std::string str = std::string((char*)key, 6);
 			for (auto &fn : m_callback_fn_list[FN_ON_PASSKEY_REQUIRED]) {
-				((fn_on_passkey_required)fn)(str);
+				((fn_on_passkey_required)fn)(str.c_str());
 			}
 		}
 	}break;
@@ -1664,7 +1679,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 	{
 		//DEBUG: asume only works in passkey type, w/o verified
 		uint8_t key[6] = { 0 };
-		memcpy_s(key, 6, p_ble_evt->evt.gap_evt.params.passkey_display.passkey, 6);
+		memcpy_s(&key[0], 6, p_ble_evt->evt.gap_evt.params.passkey_display.passkey, 6);
 		err_code = sd_ble_gap_auth_key_reply(m_adapter, m_connection_handle, BLE_GAP_AUTH_KEY_TYPE_PASSKEY, key);
 		printf("DEBUG: on passkey display, key: ");
 		for (int i = 0; i < 6; i++)
@@ -1675,7 +1690,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		if (m_callback_fn_list[FN_ON_PASSKEY_REQUIRED].size() > 0) {
 			std::string str = std::string((char*)key, 6);
 			for (auto &fn : m_callback_fn_list[FN_ON_PASSKEY_REQUIRED]) {
-				((fn_on_passkey_required)fn)(str);
+				((fn_on_passkey_required)fn)(str.c_str());
 			}
 		}
 	}break;
@@ -1692,7 +1707,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 			std::string str = std::string("timeout failed: " +
 				std::to_string(p_ble_evt->evt.gap_evt.params.timeout.src));
 			for (auto &fn : m_callback_fn_list[FN_ON_FAILED]) {
-				((fn_on_failed)fn)(str);
+				((fn_on_failed)fn)(str.c_str());
 			}
 		}
 	}break;
