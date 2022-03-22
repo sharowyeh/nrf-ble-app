@@ -446,8 +446,6 @@ uint32_t scan_start(float interval, float window, bool active, uint16_t timeout)
 	m_adv_report_buffer.len = sizeof(mp_data);
 #endif
 
-	//TODO: given scan_param or m_scan_param?
-
 	// scan-param-v5: 0,0,0,SCAN_INTERVAL,SCAN_WINDOW,SCAN_TIMEOUT
 	//                active,selective(whitelist),adv_dir_report
 	m_scan_param.interval = MSEC_TO_UNITS(interval, UNIT_0_625_MS); // 0x00A0=100ms, 0x0140=200ms
@@ -469,6 +467,23 @@ uint32_t scan_start(float interval, float window, bool active, uint16_t timeout)
 	else
 	{
 		printf("Scan started\n");
+		fflush(stdout);
+	}
+
+	return error_code;
+}
+
+uint32_t scan_stop() {
+
+	uint32_t error_code = 0;
+	error_code = sd_ble_gap_scan_stop(m_adapter);
+
+	if (error_code != NRF_SUCCESS) {
+		printf("Scan stop failed, code:%d\n", error_code);
+		fflush(stdout);
+	}
+	else {
+		printf("Scan stopped\n");
 		fflush(stdout);
 	}
 
@@ -983,7 +998,7 @@ static void on_timeout(const ble_gap_evt_t * const p_ble_gap_evt)
 	}
 	else if (p_ble_gap_evt->params.timeout.src == BLE_GAP_TIMEOUT_SRC_SCAN)
 	{
-		//TODO: may not restart scan action
+		//DEBUG: may not restart scan action
 		//scan_start();
 	}
 }
@@ -1020,6 +1035,25 @@ static void on_connected(const ble_gap_evt_t * const p_ble_gap_evt)
 	//auth_start();
 	// than
 	//service_discovery_start();
+}
+
+/*
+called on BLE_GAP_EVT_DISCONNECTED event
+caller should check reason code, refer to BLE_HCI_STATUS_CODES
+BLE_HCI_CONNECTION_TIMEOUT 0x8
+BLE_HCI_LOCAL_HOST_TERMINATED_CONNECTION 0x16
+*/
+static void on_disconnected(const ble_gap_evt_t *const p_ble_gap_evt) {
+	printf("Disconnected, reason: 0x%02X\n",
+		p_ble_gap_evt->params.disconnected.reason);
+	fflush(stdout);
+	m_connected_devices--;
+	m_connection_handle = 0;
+	connection_cleanup();
+
+	for (auto &fn : m_callback_fn_list[FN_ON_DISCONNECTED]) {
+		((fn_on_disconnected)fn)(p_ble_gap_evt->params.disconnected.reason);
+	}
 }
 
 /**@brief Function called on BLE_GATTC_EVT_PRIM_SRVC_DISC_RSP event.
@@ -1544,16 +1578,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		break;
 
 	case BLE_GAP_EVT_DISCONNECTED:
-		printf("Disconnected, reason: 0x%02X\n",
-			p_ble_evt->evt.gap_evt.params.disconnected.reason);
-		fflush(stdout);
-		m_connected_devices--;
-		m_connection_handle = 0;
-		connection_cleanup();
-
-		for (auto &fn : m_callback_fn_list[FN_ON_DISCONNECTED]) {
-			((fn_on_disconnected)fn)(p_ble_evt->evt.gap_evt.params.disconnected.reason);
-		}
+		on_disconnected(&(p_ble_evt->evt.gap_evt));
 		break;
 
 	case BLE_GAP_EVT_CONN_PARAM_UPDATE_REQUEST:

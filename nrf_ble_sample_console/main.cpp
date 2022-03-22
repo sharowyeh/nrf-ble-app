@@ -22,8 +22,8 @@ void on_dev_discovered(std::string addr_str, std::string name, addr_t addr)
 		return;
 	if (target_addr.length() == 12 && addr_str.compare(target_addr) == 0)
 	{
+		scan_stop();
 		discovered = true;
-
 		printf("[main] requirement match, connect start\n");
 		conn_start(addr);
 	}
@@ -104,11 +104,10 @@ std::condition_variable cond;
 
 uint32_t on_dev_disconnected(uint8_t reason) {
 	// 0x16: close by user terminate, 0x8: close by stack timeout(power off)
-	//if (disconn.reason == 0x16) {
+	printf("[main] disconnected reason:%x\n", reason);
+	discovered = false;
 	cond.notify_all();
-	//}
-
-	return 0;
+	return reason;
 }
 
 std::vector<std::string> split(std::string str, std::string delimiter) {
@@ -161,6 +160,16 @@ void parse_read_command(std::vector<std::string> split_cmd) {
 	printf("\n");
 }
 
+void print_usage() {
+	printf("[main] supported input command:\n" \
+		"    help        :Show this message\n" \
+		"    scan        :Start to advertising devices\n" \
+		"    disconnect  :Disconnect current connected device\n" \
+		"    write xx xx yy yy  :Write data to report characteristic by report reference\n" \
+		"    read xx xx         :Read data from report characteristic by report reference\n" \
+		"    q(or Q)     :Quit app\n");
+}
+
 void parse_input_command(std::string &line) {
 	auto sp = split(line, " ");
 	if (sp[0].compare("write") == 0) {
@@ -168,6 +177,15 @@ void parse_input_command(std::string &line) {
 	}
 	else if (sp[0].compare("read") == 0) {
 		parse_read_command(sp);
+	}
+	else if (sp[0].compare("disconnect") == 0) {
+		dongle_disconnect();
+	}
+	else if (sp[0].compare("scan") == 0) {
+		scan_start(200, 50, true, 0);
+	}
+	else if (sp[0].compare("help") == 0) {
+		print_usage();
 	}
 }
 
@@ -230,7 +248,7 @@ int main(int argc, char * argv[])
 
 			return 0;
 		}
-		
+
 		parse_input_command(line);
 	}
 }

@@ -4,11 +4,21 @@ The Nordic nRF Connect app is perfect, but I want to use it as fully tranditiona
 
 Note for my unreliable memory:
 
-- project referenced from examples in nrf-ble-driver source code, but it is not well kowning for desktop app fully controls nRF5xDK BLE connectivity FW, to communicate with target BLE devices.
+- origin source code references from nrf-ble-driver heart beat collector and SDK testcases
 
-- nrf-ble-driver dependency libraries are required for building app, release build can be downloaded from [nordic repo](https://github.com/NordicSemiconductor/pc-ble-driver/releases), extract archives both x86 32 and 64, and place the same directory which contains this solution folder.
+- nRF5xDK board(PCA10069) support SoftDevice s132 or later version
+  refer to offical github [pc-ble-driver](https://github.com/NordicSemiconductor/pc-ble-driver/tree/master#softdevice-and-ic)
 
-another opetion: reading pc-nrfconnect-ble and pc-ble-driver-js projects from nRF Connect SDK
+- Nordic connectivity firmware release binary v4.1.2(or v4.1.4) with api_v5
+  can be downloaded from [pc-ble-driver/hex](https://github.com/NordicSemiconductor/pc-ble-driver/tree/v4.1.2/hex/sd_api_v5)
+
+- pc-ble-driver development dependencies v4.1.2(or v4.1.4)
+  can be downloaded from [pc-ble-driver/releases](https://github.com/NordicSemiconductor/pc-ble-driver/releases)
+
+
+another option: 
+- write javascript pc-nrfconnect-ble and pc-ble-driver-js projects from nRF Connect SDK
+- provide interface for win32 app, likes local web api or so forth
 
 pc-nrfconnect-ble/lib/actions/adapterActions.js
   - adaptertoUse.xxxx

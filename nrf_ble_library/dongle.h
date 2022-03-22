@@ -60,6 +60,7 @@ EXTERNC NRFBLEAPI uint32_t callback_add(fn_callback_id_t fn_id, void* fn);
 EXTERNC NRFBLEAPI uint32_t dongle_init(char* serial_port, uint32_t baud_rate);
 /*interval:2.5~10240(ms), window:2.5~10240(ms), timeout:0(disable),1~65535(s)*/
 EXTERNC NRFBLEAPI uint32_t scan_start(float interval, float window, bool active, uint16_t timeout);
+EXTERNC NRFBLEAPI uint32_t scan_stop();
 EXTERNC NRFBLEAPI uint32_t conn_start(addr_t peer_addr);
 /*io_caps:0x2(BLE_GAP_IO_CAPS_KEYBOARD_ONLY)*/
 EXTERNC NRFBLEAPI uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps);
