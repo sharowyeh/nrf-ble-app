@@ -62,7 +62,7 @@ void on_dev_authenticated(uint8_t status)
 	service_discovery_start(service_list[0].uuid, service_list[0].type);
 }
 
-void on_dev_service_discovered(uint16_t last_handle)
+void on_dev_service_discovered(uint16_t last_handle, uint16_t count)
 {
 	if (++service_idx < service_list.size()) {
 		printf("[main] service discovery %d start\n", service_idx);
@@ -70,18 +70,27 @@ void on_dev_service_discovered(uint16_t last_handle)
 	}
 	else {
 		// read report ref and enable cccd notification
-		printf("[main] service enable start\n");
+		printf("[main] service enable start for total %d characteristics\n", count);
 		service_enable_start();
 	}
 }
 
-void on_dev_service_enabled()
+void on_dev_service_enabled(uint16_t count)
 {
-	printf("[main] service enabled\n");
+	printf("[main] service enabled with %d descriptors\n", count);
 	fflush(stdout);
 	printf("[main] === ready to inteact via report characteristic(use hex) ===\n");
 	printf("[main] input \"write xx xx yy yy yy..\" write data to target, which xx is report reference, yy is payload data\n");
 	printf("[main] input \"read xx xx\" read data from target, which xx is report reference data\n");
+	fflush(stdout);
+
+	uint16_t *handle_list = (uint16_t*)calloc(count, sizeof(uint16_t));
+	uint8_t *refs_list = (uint8_t*)calloc(count * 2, sizeof(uint8_t));
+	uint16_t len = count;
+	report_char_list(handle_list, refs_list, &len);
+	for (int i = 0; i < len; i++) {
+		printf("[main] report char handle:%04X refs:%02x %02x\n", handle_list[i], refs_list[i * 2], refs_list[i * 2 + 1]);
+	}
 	fflush(stdout);
 }
 

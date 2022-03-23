@@ -88,7 +88,7 @@ typedef struct {
 	uint16_t uuid = 0; /* ble_gattc_char_t::uuid */
 	ble_gattc_handle_range_t handle_range = { 0, 0 }; /* handle range of descs */
 	uint16_t report_ref_handle = 0; /* none zero which has BLE_UUID_REPORT_REF_DESCR desc */
-	unsigned char report_ref[32] = { 0 }; /* reference value of BLE_UUID_REPORT_REF_DESCR desc */
+	uint8_t report_ref[32] = { 0 }; /* reference value of BLE_UUID_REPORT_REF_DESCR desc */
 	bool report_ref_is_read = false; /* report reference is read */
 	uint16_t cccd_handle = 0; /* none zero which has BLE_UUID_CCCD desc */
 	bool cccd_enabled = false; /* enable state of BLE_UUID_CCCD desc */
@@ -705,15 +705,21 @@ static uint32_t set_cccd_notification(uint16_t handle)
 	if (enable_next == false) {
 		printf("List of characteristics with report reference data.\n");
 		fflush(stdout);
+		uint16_t count = 0;
 		for (int i = 0; i < m_char_list.size(); i++) {
 			if (m_char_list[i].report_ref_is_read) {
 				printf(" char:%04X desc:%04X reference data:%02x %02x\n", 
 					m_char_list[i].handle, m_char_list[i].report_ref_handle, 
 					m_char_list[i].report_ref[0], m_char_list[i].report_ref[1]);
 			}
+
+			if (m_char_list[i].report_ref_is_read || m_char_list[i].cccd_enabled) {
+				count++;
+			}
 		}
 		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_ENABLED]) {
-			((fn_on_service_enabled)fn)();
+			// return number of characteristics
+			((fn_on_service_enabled)fn)(count);
 		}
 	}
 
@@ -762,12 +768,29 @@ static uint32_t read_report_refs(uint16_t handle)
 	return error_code;
 }
 
-/* read all report reference and set CCCD notification */
 uint32_t service_enable_start() {
 
 	read_report_refs(0);
+	// read_report_refs will also set_cccd_notification
 
 	return 0;
+}
+
+uint32_t report_char_list(uint16_t *handle_list, uint8_t *refs_list, uint16_t *len) {
+	if (handle_list == 0 || refs_list == 0 || len == 0) {
+		return NRF_ERROR_INVALID_PARAM;
+	}
+
+	uint16_t count = 0;
+	for (int i = 0; i < m_char_list.size() && count < *len; i++) {
+		if (m_char_list[i].report_ref_is_read) {
+			handle_list[count] = m_char_list[i].handle;
+			memcpy_s(&(refs_list[count * 2]), 2, &(m_char_list[i].report_ref[0]), 2);
+			count++;
+		}
+	}
+	*len = std::min(*len, count);
+	return NRF_SUCCESS;
 }
 
 uint32_t data_read(uint16_t handle, uint8_t *data, uint16_t *len)
@@ -876,7 +899,6 @@ uint32_t data_write_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t l
 	return data_write(handle, data, len);
 }
 
-/* disconnect action will response status BLE_HCI_LOCAL_HOST_TERMINATED_CONNECTION from BLE_GAP_EVT_DISCONNECTED */
 uint32_t dongle_disconnect() 
 {
 	uint32_t error_code = 0;
@@ -885,10 +907,6 @@ uint32_t dongle_disconnect()
 	return error_code;
 }
 
-/* reset connectivity dongle
-refer to https://infocenter.nordicsemi.com/index.jsp?topic=%2Fps_nrf52840%2Fpower.html&anchor=concept_res_behav
-refer to https://infocenter.nordicsemi.com/index.jsp?topic=%2Fcom.nordic.infocenter.sdk5.v15.3.0%2Fserialization_codecs.html
-*/
 uint32_t dongle_reset() {
 	auto error_code = sd_rpc_conn_reset(m_adapter, SOFT_RESET);
 
@@ -1134,7 +1152,7 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
 		fflush(stdout);
 		// invoke callback to caller when serviec discovery terminated
 		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_DISCOVERED]) {
-			((fn_on_service_discovered)fn)(m_service_start_handle);
+			((fn_on_service_discovered)fn)(m_service_start_handle, m_char_list.size());
 		}
 		return;
 	}
@@ -1195,7 +1213,7 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 		fflush(stdout);
 		// invoke callback to caller when serviec discovery terminated
 		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_DISCOVERED]) {
-			((fn_on_service_discovered)fn)(m_service_start_handle);
+			((fn_on_service_discovered)fn)(m_service_start_handle, m_char_list.size());
 		}
 		return;
 	}
@@ -1256,17 +1274,18 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 	}
 
 	if (++m_char_idx < m_char_list.size()) {
-		// move next characteristic
+		// move to find descriptors of the next characteristic
 		descr_discovery_start(m_char_list[m_char_idx].handle_range);
 	}
 	else if (last_handle < m_service_end_handle) {
+		// move to find rest of characteristics
 		ble_gattc_handle_range_t range{ m_service_start_handle, m_service_end_handle };
 		char_discovery_start(range);
 	}
 	else {
 		// invoke callback to caller when all characteristics discovered
 		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_DISCOVERED]) {
-			((fn_on_service_discovered)fn)(m_service_start_handle);
+			((fn_on_service_discovered)fn)(m_service_start_handle, m_char_list.size());
 		}
 	}
 
