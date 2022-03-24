@@ -104,11 +104,21 @@ namespace NrfBLESampleWinform
             if (connected == false || authenticated == false)
                 return;
 
-            byte[] data = textBoxWriteData.Text.Split(' ').Select(d => {
-                return byte.Parse(d, System.Globalization.NumberStyles.HexNumber);
-            }).ToArray();
+            byte[] data;
+            try
+            {
+                data = textBoxWriteData.Text.Split(' ').Select(d =>
+                {
+                    return byte.Parse(d, System.Globalization.NumberStyles.HexNumber);
+                }).ToArray();
+            }
+            catch (Exception)
+            {
+                WriteLog("Data input format error");
+                return;
+            }
 
-            var args = comboBoxReportChar.SelectedText.Split(' ');
+            var args = ((string)comboBoxReportChar.SelectedItem).Split(' ');
             if (args.Length == 3)
             {
                 byte[] refs = new byte[2] {
@@ -129,6 +139,37 @@ namespace NrfBLESampleWinform
         {
             if (connected == false || authenticated == false)
                 return;
+
+            byte[] data = new byte[NrfBLELibrary.DATA_BUFFER_SIZE];
+            ushort len = NrfBLELibrary.DATA_BUFFER_SIZE;
+
+            var args = ((string)comboBoxReportChar.SelectedItem).Split(' ');
+            if (args.Length == 3)
+            {
+                byte[] refs = new byte[2] {
+                    byte.Parse(args[0], System.Globalization.NumberStyles.HexNumber),
+                    byte.Parse(args[1], System.Globalization.NumberStyles.HexNumber),
+                };
+                NrfBLELibrary.DataReadByReportRef(refs, data, ref len);
+            }
+            else if (args.Length == 1)
+            {
+                var handle = ushort.Parse(args[0], System.Globalization.NumberStyles.HexNumber);
+                NrfBLELibrary.DataRead(handle, data, ref len);
+            }
+            else
+            {
+                // characteristic selected item error
+                return;
+            }
+
+
+            var log = $"data read ";
+            for (int i = 0; i < len; i++)
+            {
+                log += $"{data[i]:x02} ";
+            }
+            WriteLog(log);
         }
 
         private void ButtonDisconnect_Click(object sender, EventArgs e)
@@ -171,7 +212,7 @@ namespace NrfBLESampleWinform
 
         private void OnDiscovered(string addrString, string name, byte addrType, byte[] addr, sbyte rssi)
         {
-            WriteLog($"discovered address:{addrString} rssi:{rssi} type:{addrType}");
+            WriteLog($"discovered {name} {addrString} rssi:{rssi} type:{addrType}");
 
             string targetAddrString = (string)textBoxAddress.Invoke(
                 new Func<string>(() => { return textBoxAddress.Text; }));
@@ -188,7 +229,7 @@ namespace NrfBLESampleWinform
                 discovered = true;
                 foundAddrType = addrType;
                 Array.Copy(addr, foundAddr, 6);
-                WriteLog($"=== {addrString} {rssi} match, ready to connect ===");
+                WriteLog($"=== {name} {addrString} {rssi} match, ready to connect ===");
                 ///if auto
                 //NrfBLELibrary.ConnStart(addrType, addr);
             }
