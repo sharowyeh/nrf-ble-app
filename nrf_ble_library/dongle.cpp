@@ -515,13 +515,13 @@ uint32_t conn_start(uint8_t addr_type, uint8_t addr[6])
 
 	m_connection_param.min_conn_interval = MIN_CONNECTION_INTERVAL;
 	m_connection_param.max_conn_interval = MAX_CONNECTION_INTERVAL;
-	m_connection_param.slave_latency = 10;
+	m_connection_param.slave_latency = 0;
 	m_connection_param.conn_sup_timeout = CONNECTION_SUPERVISION_TIMEOUT;
 	printf("DEBUG: conn start, conn params min=%d max=%d late=%d timeout=%d\n",
 		(int)(m_connection_param.min_conn_interval * 1.25),
 		(int)(m_connection_param.max_conn_interval * 1.25),
 		m_connection_param.slave_latency,
-		(int)(m_connection_param.conn_sup_timeout / 100));
+		(int)(m_connection_param.conn_sup_timeout * 10));
 
 	uint32_t err_code;
 	err_code = sd_ble_gap_connect(m_adapter,
@@ -904,6 +904,7 @@ uint32_t dongle_disconnect()
 	uint32_t error_code = 0;
 	error_code = sd_ble_gap_disconnect(m_adapter, m_connection_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
 	printf("DEBUG: disconnect code:%d\n", error_code);
+	connection_cleanup();
 	return error_code;
 }
 
@@ -914,18 +915,13 @@ uint32_t dongle_reset() {
 	{
 		printf("Failed to reset, code: 0x%02X\n", error_code);
 		fflush(stdout);
-		return error_code;
+		//return error_code;
 	}
 
 	printf("Reset\n");
 	fflush(stdout);
-	return error_code;
-}
 
-uint32_t dongle_close() {
-	m_callback_fn_list.clear();
-
-	auto error_code = sd_rpc_close(m_adapter);
+	error_code = sd_rpc_close(m_adapter);
 
 	if (error_code != NRF_SUCCESS)
 	{
@@ -1461,7 +1457,7 @@ static void on_hvx(const ble_gattc_evt_t * const p_ble_gattc_evt)
 	auto hvx_handle = p_ble_gattc_evt->params.hvx.handle;
 	auto len = p_ble_gattc_evt->params.hvx.len;
 	auto p_data = p_ble_gattc_evt->params.hvx.data;
-
+	
 	uint32_t char_idx = -1;
 	for (int i = 0; i < m_char_list.size(); i++) {
 		if (m_char_list[i].handle == hvx_handle) {

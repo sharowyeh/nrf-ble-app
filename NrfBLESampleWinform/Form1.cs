@@ -23,6 +23,19 @@ namespace NrfBLESampleWinform
         public FnOnFailed fnOnFailed;
         public FnOnDataReceived fnOnDataReceived;
         public FnOnDataSent fnOnDataSent;
+        
+        private bool discovered = false;
+        private byte foundAddrType = 0;
+        private byte[] foundAddr = new byte[6];
+
+        private int serviceIdx = 0;
+        private ushort[][] serviceList = {
+            new ushort[] { 0x1800, 0x01 },
+            new ushort[] { 0x180F, 0x01 },
+            new ushort[] { 0x1812, 0x01 } };
+
+        private bool connected = false;
+        private bool authenticated = false;
 
         public Form1()
         {
@@ -59,9 +72,10 @@ namespace NrfBLESampleWinform
             buttonDongleInit.Click += ButtonDongleInit_Click;
             buttonScanStart.Click += ButtonScanStart_Click;
             buttonConnect.Click += ButtonConnect_Click;
+            buttonWrite.Click += ButtonWrite_Click;
+            buttonRead.Click += ButtonRead_Click;
             buttonDisconnect.Click += ButtonDisconnect_Click;
             buttonDongleReset.Click += ButtonDongleReset_Click;
-            buttonDongleClose.Click += ButtonDongleClose_Click;
         }
 
         private void ButtonDongleInit_Click(object sender, EventArgs e)
@@ -85,6 +99,38 @@ namespace NrfBLESampleWinform
             NrfBLELibrary.ConnStart(foundAddrType, foundAddr);
         }
 
+        private void ButtonWrite_Click(object sender, EventArgs e)
+        {
+            if (connected == false || authenticated == false)
+                return;
+
+            byte[] data = textBoxWriteData.Text.Split(' ').Select(d => {
+                return byte.Parse(d, System.Globalization.NumberStyles.HexNumber);
+            }).ToArray();
+
+            var args = comboBoxReportChar.SelectedText.Split(' ');
+            if (args.Length == 3)
+            {
+                byte[] refs = new byte[2] {
+                    byte.Parse(args[0], System.Globalization.NumberStyles.HexNumber),
+                    byte.Parse(args[1], System.Globalization.NumberStyles.HexNumber),
+                };
+                NrfBLELibrary.DataWriteByReportRef(refs, data, (ushort)data.Length);
+            }
+            else if (args.Length == 1)
+            {
+                var handle = ushort.Parse(args[0], System.Globalization.NumberStyles.HexNumber);
+                NrfBLELibrary.DataWrite(handle, data, (ushort)data.Length);
+            }
+
+        }
+
+        private void ButtonRead_Click(object sender, EventArgs e)
+        {
+            if (connected == false || authenticated == false)
+                return;
+        }
+
         private void ButtonDisconnect_Click(object sender, EventArgs e)
         {
             CleanupData();
@@ -94,14 +140,9 @@ namespace NrfBLESampleWinform
         private void ButtonDongleReset_Click(object sender, EventArgs e)
         {
             var code = NrfBLELibrary.DongleReset();
-            WriteLog($"dongle reset {(code == 0 ? "ok" : "fail")} code:{code}");
+            WriteLog($"dongle reset & close {(code == 0 ? "ok" : "fail")} code:{code}");
         }
 
-        private void ButtonDongleClose_Click(object sender, EventArgs e)
-        {
-            var code = NrfBLELibrary.DongleClose();
-            WriteLog($"dongle close {(code == 0 ? "ok" : "fail")} code:{code}");
-        }
 
         #region Helper functions
 
@@ -111,11 +152,6 @@ namespace NrfBLESampleWinform
             var stamp = $"{DateTime.Now:mm:ss.fff}";
             textBoxLog.Invoke(new Action<string>((obj) => {
                 textBoxLog.AppendText($"{textBoxLog.Lines.Length} [{obj}] {message}\r\n");
-                //if (textBoxLog.Lines.Length > 100)
-                //{
-                //    var lines = textBoxLog.Lines;
-                //    textBoxLog.Lines = lines.Skip(5).Take(textBoxLog.Lines.Length - 5).ToArray();
-                //}
             }), stamp);
         }
 
@@ -124,16 +160,14 @@ namespace NrfBLESampleWinform
             discovered = false;
             foundAddrType = 0;
             foundAddr = new byte[6];
+            connected = false;
+            authenticated = false;
         }
 
         #endregion
 
 
         #region Callback functions
-
-        private bool discovered = false;
-        private byte foundAddrType = 0;
-        private byte[] foundAddr = new byte[6];
 
         private void OnDiscovered(string addrString, string name, byte addrType, byte[] addr, sbyte rssi)
         {
@@ -150,11 +184,11 @@ namespace NrfBLESampleWinform
             if (string.IsNullOrWhiteSpace(targetAddrString) ||
                 addrString.Equals(targetAddrString))
             {
+                NrfBLELibrary.ScanStop();
                 discovered = true;
                 foundAddrType = addrType;
                 Array.Copy(addr, foundAddr, 6);
                 WriteLog($"=== {addrString} {rssi} match, ready to connect ===");
-                NrfBLELibrary.ScanStop();
                 ///if auto
                 //NrfBLELibrary.ConnStart(addrType, addr);
             }
@@ -162,6 +196,7 @@ namespace NrfBLESampleWinform
 
         private void OnConnected(byte addrType, byte[] addr)
         {
+            connected = true;
             WriteLog($"connected, auth start");
             NrfBLELibrary.AuthStart(true, false, 0x2);
         }
@@ -171,14 +206,14 @@ namespace NrfBLESampleWinform
             WriteLog($"=== Show passkey {passkey} ===");
         }
 
-        private int serviceIdx = 0;
-        private ushort[][] serviceList = {
-            new ushort[] { 0x1800, 0x01 },
-            new ushort[] { 0x180F, 0x01 },
-            new ushort[] { 0x1812, 0x01 } };
-
         private void OnAuthenticated(byte status)
         {
+            if (status != 0)
+            {
+                WriteLog($"auth error code:{status}");
+                return;
+            }
+            authenticated = true;
             serviceIdx = 0;
             WriteLog($"service discovery 0 start");
             NrfBLELibrary.ServiceDiscoveryStart(serviceList[0][0], (byte)serviceList[0][1]);

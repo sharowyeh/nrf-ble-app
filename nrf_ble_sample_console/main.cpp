@@ -11,6 +11,8 @@ bool discovered = false;
 std::string target_addr = "0";
 // argv[4], default no limitation(any dBm greater than -128)
 int8_t target_rssi = INT8_MIN;
+bool connected = false;
+bool authenticated = false;
 
 void on_dev_discovered(const char *addr_str, const char *name, uint8_t addr_type, uint8_t *addr, int8_t rssi)
 {
@@ -20,7 +22,7 @@ void on_dev_discovered(const char *addr_str, const char *name, uint8_t addr_type
 		return;
 	if (rssi < target_rssi)
 		return;
-	if (target_addr.length() == 12 && std::string(addr_str).compare(target_addr) == 0)
+	if (target_addr.length() < 12 || std::string(addr_str).compare(target_addr) == 0)
 	{
 		scan_stop();
 		discovered = true;
@@ -31,6 +33,7 @@ void on_dev_discovered(const char *addr_str, const char *name, uint8_t addr_type
 
 void on_dev_connected(uint8_t addr_type, uint8_t *addr)
 {
+	connected = true;
 	printf("[main] auth start\n");
 	// NOTICE: service discovery should wait before param updated event or bond for auth secure param(or passkey)
 	auth_start(true, false, 0x2);
@@ -57,6 +60,11 @@ std::vector<service> service_list = {
 
 void on_dev_authenticated(uint8_t status)
 {
+	if (status != 0) {
+		printf("[main] auth error code:%d\n", status);
+		return;
+	}
+	authenticated = true;
 	service_idx = 0;
 	printf("[main] service discovery 0 start\n");
 	service_discovery_start(service_list[0].uuid, service_list[0].type);
@@ -101,6 +109,7 @@ uint32_t on_dev_disconnected(uint8_t reason) {
 	// 0x16: close by user terminate, 0x8: close by stack timeout(power off)
 	printf("[main] disconnected reason:%x\n", reason);
 	discovered = false;
+	connected = false;
 	cond.notify_all();
 	return reason;
 }
@@ -214,7 +223,7 @@ int main(int argc, char * argv[])
 
 	uint32_t error_code;
 	char     serial_port[10] = "COM3";
-	uint32_t baud_rate = 10000;
+	uint32_t baud_rate = 1000000;
 
 	// given serial port string
 	if (argc > 1)
@@ -248,14 +257,19 @@ int main(int argc, char * argv[])
 		//if (c == 'q' || c == 'Q')
 		if (line.compare("q") == 0 || line.compare("Q") == 0)
 		{
-			auto err = dongle_disconnect();
-			// if success, wait until dongle_disconnect() finished;
-			if (err = 0) {
-				std::unique_lock<std::mutex> lck{ mtx };
-				cond.wait(lck);
+			scan_stop();
+
+			uint32_t err = 0;
+			if (connected) {
+				err = dongle_disconnect();
+				// if success, wait until dongle_disconnect() finished;
+				if (err = 0) {
+					std::unique_lock<std::mutex> lck{ mtx };
+					cond.wait(lck);
+				}
 			}
+			
 			dongle_reset();
-			dongle_close();
 
 			return 0;
 		}

@@ -72,4 +72,3 @@ refer to https://infocenter.nordicsemi.com/index.jsp?topic=%2Fps_nrf52840%2Fpowe
 refer to https://infocenter.nordicsemi.com/index.jsp?topic=%2Fcom.nordic.infocenter.sdk5.v15.3.0%2Fserialization_codecs.html
 */
 EXTERNC NRFBLEAPI uint32_t dongle_reset();
-EXTERNC NRFBLEAPI uint32_t dongle_close();

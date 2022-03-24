@@ -45,7 +45,6 @@
             this.textBoxReadData = new System.Windows.Forms.TextBox();
             this.buttonDisconnect = new System.Windows.Forms.Button();
             this.buttonDongleReset = new System.Windows.Forms.Button();
-            this.buttonDongleClose = new System.Windows.Forms.Button();
             this.buttonConnect = new System.Windows.Forms.Button();
             this.buttonWrite = new System.Windows.Forms.Button();
             this.buttonRead = new System.Windows.Forms.Button();
@@ -75,7 +74,7 @@
             this.textBoxBaudRate.Name = "textBoxBaudRate";
             this.textBoxBaudRate.Size = new System.Drawing.Size(120, 24);
             this.textBoxBaudRate.TabIndex = 2;
-            this.textBoxBaudRate.Text = "10000";
+            this.textBoxBaudRate.Text = "1000000";
             // 
             // label1
             // 
@@ -198,15 +197,6 @@
             this.buttonDongleReset.Text = "Dongle Reset";
             this.buttonDongleReset.UseVisualStyleBackColor = true;
             // 
-            // buttonDongleClose
-            // 
-            this.buttonDongleClose.Location = new System.Drawing.Point(652, 406);
-            this.buttonDongleClose.Name = "buttonDongleClose";
-            this.buttonDongleClose.Size = new System.Drawing.Size(120, 25);
-            this.buttonDongleClose.TabIndex = 19;
-            this.buttonDongleClose.Text = "Dongle Close";
-            this.buttonDongleClose.UseVisualStyleBackColor = true;
-            // 
             // buttonConnect
             // 
             this.buttonConnect.Location = new System.Drawing.Point(652, 194);
@@ -241,7 +231,6 @@
             this.Controls.Add(this.buttonRead);
             this.Controls.Add(this.buttonWrite);
             this.Controls.Add(this.buttonConnect);
-            this.Controls.Add(this.buttonDongleClose);
             this.Controls.Add(this.buttonDongleReset);
             this.Controls.Add(this.buttonDisconnect);
             this.Controls.Add(this.textBoxReadData);
@@ -286,7 +275,6 @@
         private System.Windows.Forms.TextBox textBoxReadData;
         private System.Windows.Forms.Button buttonDisconnect;
         private System.Windows.Forms.Button buttonDongleReset;
-        private System.Windows.Forms.Button buttonDongleClose;
         private System.Windows.Forms.Button buttonConnect;
         private System.Windows.Forms.Button buttonWrite;
         private System.Windows.Forms.Button buttonRead;

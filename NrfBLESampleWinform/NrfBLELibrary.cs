@@ -113,9 +113,6 @@ namespace NrfBLESampleWinform
         [DllImport("nrf_ble_library.dll", CharSet = CharSet.Ansi, EntryPoint = "dongle_reset")]
         public static extern uint DongleReset();
 
-        [DllImport("nrf_ble_library.dll", CharSet = CharSet.Ansi, EntryPoint = "dongle_close")]
-        public static extern uint DongleClose();
-
     }
 
 
