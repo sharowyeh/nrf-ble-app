@@ -29,6 +29,16 @@ typedef enum {
 	FN_ON_DATA_SENT
 } fn_callback_id_t;
 
+/* align to sd_rpc_log_severity_t */
+typedef enum {
+	LOG_TRACE,
+	LOG_DEBUG,
+	LOG_INFO,
+	LOG_WARNING,
+	LOG_ERROR,
+	LOG_FATAL
+} log_level_t;
+
 typedef void(*fn_on_discovered)(const char *addr_str, const char *name, 
 	uint8_t addr_type, uint8_t addr[6], int8_t rssi);
 typedef void(*fn_on_connected)(uint8_t addr_type, uint8_t addr[6]);
