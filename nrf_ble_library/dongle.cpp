@@ -16,7 +16,7 @@
 #include <time.h>
 #include <chrono>
 
-typedef struct
+typedef struct _addr_t
 {
 	uint8_t addr_type : 7;       /**< See @ref BLE_GAP_ADDR_TYPES. default 7 from ble_gap_addr_t */
 	uint8_t addr[6/*BLE_GAP_ADDR_LEN*/]; /**< 48-bit address, LSB format. */
@@ -24,13 +24,13 @@ typedef struct
 } addr_t;
 
 /* see also ble_data_t but fixed data memory allocation for ease of init */
-typedef struct
+typedef struct _data_t
 {
 	uint8_t  *p_data;   /**< Pointer to data. */
 	uint16_t data_len; /**< Length of data. */
 } data_t;
 
-enum
+enum _uint_ms
 {
 	UNIT_0_625_MS = 625,  /**< Number of microseconds in 0.625 milliseconds. */
 	UNIT_1_25_MS = 1250, /**< Number of microseconds in 1.25 milliseconds. */

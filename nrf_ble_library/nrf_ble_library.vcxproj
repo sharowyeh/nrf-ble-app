@@ -91,7 +91,7 @@
       <PreprocessorDefinitions>_DEBUG;NRFBLELIBRARY_EXPORTS;_WINDOWS;_USRDLL;NRF_SD_BLE_API=5;PC_BLE_DRIVER_STATIC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(SolutionDir)..\pc-ble-driver\include\sd_api_v5;$(SolutionDir)..\pc-ble-driver\include\common;$(SolutionDir)..\pc-ble-driver\include\common\config;$(SolutionDir)..\pc-ble-driver\include\common\sdk_compat;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)..\pc-ble-driver\include\sd_api_v5;$(SolutionDir)..\pc-ble-driver\include\common;$(SolutionDir)..\pc-ble-driver\include\common\config;$(SolutionDir)..\pc-ble-driver\include\common\sdk_compat;$(SolutionDir)..\nrf-ble-driver-4.1.2-win_x86_32\include\sd_api_v5;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -110,7 +110,7 @@
       <PreprocessorDefinitions>WIN32;_DEBUG;NRFBLELIBRARY_EXPORTS;_WINDOWS;_USRDLL;NRF_SD_BLE_API=5;PC_BLE_DRIVER_STATIC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(SolutionDir)..\pc-ble-driver\include\sd_api_v5;$(SolutionDir)..\pc-ble-driver\include\common;$(SolutionDir)..\pc-ble-driver\include\common\config;$(SolutionDir)..\pc-ble-driver\include\common\sdk_compat;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)..\pc-ble-driver\include\sd_api_v5;$(SolutionDir)..\pc-ble-driver\include\common;$(SolutionDir)..\pc-ble-driver\include\common\config;$(SolutionDir)..\pc-ble-driver\include\common\sdk_compat;$(SolutionDir)..\nrf-ble-driver-4.1.2-win_x86_32\include\sd_api_v5;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
