@@ -85,7 +85,7 @@ static std::map<fn_callback_id_t, std::vector<void*>> m_callback_fn_list;
 std::map<uint64_t, ble_gap_evt_adv_report_t> m_adv_list; /*addr, report*/
 
 /* Discovered characteristic data structure */
-typedef struct {
+typedef struct _dev_char_t {
 	uint16_t handle = 0; /* ble_gattc_char_t::handle_value */
 	uint16_t uuid = 0; /* ble_gattc_char_t::uuid */
 	ble_gattc_handle_range_t handle_range = { 0, 0 }; /* handle range of descs */

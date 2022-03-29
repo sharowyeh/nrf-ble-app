@@ -16,7 +16,7 @@
 
 #include <string>
 
-typedef enum {
+typedef enum _fn_callback_id_t {
 	FN_ON_DISCOVERED,
 	FN_ON_CONNECTED,
 	FN_ON_PASSKEY_REQUIRED,
@@ -30,7 +30,7 @@ typedef enum {
 } fn_callback_id_t;
 
 /* align to sd_rpc_log_severity_t */
-typedef enum {
+typedef enum _log_level_t {
 	LOG_TRACE,
 	LOG_DEBUG,
 	LOG_INFO,
