@@ -27,6 +27,7 @@ namespace NrfBLESampleWinform
         private bool discovered = false;
         private byte foundAddrType = 0;
         private byte[] foundAddr = new byte[6];
+        private string foundAddrString = "";
 
         private int serviceIdx = 0;
         private ushort[][] serviceList = {
@@ -80,6 +81,7 @@ namespace NrfBLESampleWinform
 
         private void ButtonDongleInit_Click(object sender, EventArgs e)
         {
+            WriteLog("dongle init, wait...");
             uint baudrate = uint.Parse(textBoxBaudRate.Text);
             var code = NrfBLELibrary.DongleInit(textBoxSerialPort.Text, baudrate);
             WriteLog($"dongle init {(code == 0 ? "ok" : "fail")} code:{code}");
@@ -88,7 +90,8 @@ namespace NrfBLESampleWinform
         private void ButtonScanStart_Click(object sender, EventArgs e)
         {
             CleanupData();
-            NrfBLELibrary.ScanStart(200, 50, true, 0);
+            var code = NrfBLELibrary.ScanStart(200, 50, true, 0);
+            WriteLog($"scan start code:{code}, wait...");
         }
 
         private void ButtonConnect_Click(object sender, EventArgs e)
@@ -96,7 +99,8 @@ namespace NrfBLESampleWinform
             if (discovered == false)
                 return;
             
-            NrfBLELibrary.ConnStart(foundAddrType, foundAddr);
+            var code = NrfBLELibrary.ConnStart(foundAddrType, foundAddr);
+            WriteLog($"connect {foundAddrString} start code:{code}, wait...");
         }
 
         private void ButtonWrite_Click(object sender, EventArgs e)
@@ -175,7 +179,8 @@ namespace NrfBLESampleWinform
         private void ButtonDisconnect_Click(object sender, EventArgs e)
         {
             CleanupData();
-            NrfBLELibrary.DongleDisconnect();
+            var code = NrfBLELibrary.DongleDisconnect();
+            WriteLog($"dongle disconnect code:{code}");
         }
 
         private void ButtonDongleReset_Click(object sender, EventArgs e)
@@ -203,6 +208,11 @@ namespace NrfBLESampleWinform
             foundAddr = new byte[6];
             connected = false;
             authenticated = false;
+            comboBoxDiscovered.Invoke(new Action(() =>
+            {
+                label6.Text = "0 Discovered:";
+                comboBoxDiscovered.Items.Clear();
+            }));
         }
 
         #endregion
@@ -212,12 +222,32 @@ namespace NrfBLESampleWinform
 
         private void OnDiscovered(string addrString, string name, byte addrType, byte[] addr, sbyte rssi)
         {
-            WriteLog($"discovered {name} {addrString} rssi:{rssi} type:{addrType}");
+            //WriteLog($"discovered {addrString} {name} rssi:{rssi} type:{addrType}");
 
             string targetAddrString = (string)textBoxAddress.Invoke(
                 new Func<string>(() => { return textBoxAddress.Text; }));
             string targetRssi = (string)textBoxRssi.Invoke(
                 new Func<string>(() => { return textBoxRssi.Text; }));
+
+            comboBoxDiscovered.Invoke(new Action(() =>
+            {
+                bool isUpdate = false;
+                for (int i = 0; i < comboBoxDiscovered.Items.Count; i++)
+                {
+                    if (((string)comboBoxDiscovered.Items[i]).Contains(addrString))
+                    {
+                        comboBoxDiscovered.Items[i] = $"{addrString} {name} {rssi}";
+                        isUpdate = true;
+                        break;
+                    }
+                }
+                if (isUpdate == false)
+                {
+                    comboBoxDiscovered.Items.Add($"{addrString} {name} {rssi}");
+                    label6.Text = $"{comboBoxDiscovered.Items.Count} Discovered:";
+                }
+            }));
+            
 
             if (rssi < sbyte.Parse(targetRssi) || discovered)
                 return;
@@ -225,11 +255,27 @@ namespace NrfBLESampleWinform
             if (string.IsNullOrWhiteSpace(targetAddrString) ||
                 addrString.Equals(targetAddrString))
             {
-                NrfBLELibrary.ScanStop();
+                var code = NrfBLELibrary.ScanStop();
+                WriteLog($"scan stop code:{code}");
                 discovered = true;
                 foundAddrType = addrType;
                 Array.Copy(addr, foundAddr, 6);
-                WriteLog($"=== {name} {addrString} {rssi} match, ready to connect ===");
+                foundAddrString = addrString;
+
+                comboBoxDiscovered.Invoke(new Action(() =>
+                {
+                    for (int i = 0; i < comboBoxDiscovered.Items.Count; i++)
+                    {
+                        if (((string)comboBoxDiscovered.Items[i]).Contains(addrString))
+                        {
+                            comboBoxDiscovered.Items[i] = $"{addrString} {name} {rssi}";
+                            comboBoxDiscovered.SelectedIndex = i;
+                            break;
+                        }
+                    }
+                }));
+
+                WriteLog($"=== {addrString} {name} {rssi} match, ready to connect ===");
                 ///if auto
                 //NrfBLELibrary.ConnStart(addrType, addr);
             }

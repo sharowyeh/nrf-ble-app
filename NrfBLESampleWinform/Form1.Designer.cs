@@ -48,16 +48,18 @@
             this.buttonConnect = new System.Windows.Forms.Button();
             this.buttonWrite = new System.Windows.Forms.Button();
             this.buttonRead = new System.Windows.Forms.Button();
+            this.label6 = new System.Windows.Forms.Label();
+            this.comboBoxDiscovered = new System.Windows.Forms.ComboBox();
             this.SuspendLayout();
             // 
             // textBoxLog
             // 
-            this.textBoxLog.Location = new System.Drawing.Point(12, 12);
+            this.textBoxLog.Location = new System.Drawing.Point(12, 43);
             this.textBoxLog.Multiline = true;
             this.textBoxLog.Name = "textBoxLog";
             this.textBoxLog.ReadOnly = true;
             this.textBoxLog.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.textBoxLog.Size = new System.Drawing.Size(550, 425);
+            this.textBoxLog.Size = new System.Drawing.Size(550, 394);
             this.textBoxLog.TabIndex = 0;
             // 
             // textBoxSerialPort
@@ -224,10 +226,29 @@
             this.buttonRead.Text = "Read";
             this.buttonRead.UseVisualStyleBackColor = true;
             // 
+            // label6
+            // 
+            this.label6.AutoSize = true;
+            this.label6.Location = new System.Drawing.Point(12, 15);
+            this.label6.Name = "label6";
+            this.label6.Size = new System.Drawing.Size(84, 17);
+            this.label6.TabIndex = 24;
+            this.label6.Text = "0 Discovered:";
+            // 
+            // comboBoxDiscovered
+            // 
+            this.comboBoxDiscovered.FormattingEnabled = true;
+            this.comboBoxDiscovered.Location = new System.Drawing.Point(102, 12);
+            this.comboBoxDiscovered.Name = "comboBoxDiscovered";
+            this.comboBoxDiscovered.Size = new System.Drawing.Size(300, 25);
+            this.comboBoxDiscovered.TabIndex = 23;
+            // 
             // Form1
             // 
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.None;
             this.ClientSize = new System.Drawing.Size(784, 461);
+            this.Controls.Add(this.label6);
+            this.Controls.Add(this.comboBoxDiscovered);
             this.Controls.Add(this.buttonRead);
             this.Controls.Add(this.buttonWrite);
             this.Controls.Add(this.buttonConnect);
@@ -278,6 +299,8 @@
         private System.Windows.Forms.Button buttonConnect;
         private System.Windows.Forms.Button buttonWrite;
         private System.Windows.Forms.Button buttonRead;
+        private System.Windows.Forms.Label label6;
+        private System.Windows.Forms.ComboBox comboBoxDiscovered;
     }
 }
 
