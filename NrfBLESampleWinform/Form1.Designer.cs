@@ -50,6 +50,7 @@
             this.buttonRead = new System.Windows.Forms.Button();
             this.label6 = new System.Windows.Forms.Label();
             this.comboBoxDiscovered = new System.Windows.Forms.ComboBox();
+            this.buttonScanStop = new System.Windows.Forms.Button();
             this.SuspendLayout();
             // 
             // textBoxLog
@@ -145,13 +146,13 @@
             this.buttonScanStart.Name = "buttonScanStart";
             this.buttonScanStart.Size = new System.Drawing.Size(120, 25);
             this.buttonScanStart.TabIndex = 10;
-            this.buttonScanStart.Text = "Scan";
+            this.buttonScanStart.Text = "Scan start";
             this.buttonScanStart.UseVisualStyleBackColor = true;
             // 
             // comboBoxReportChar
             // 
             this.comboBoxReportChar.FormattingEnabled = true;
-            this.comboBoxReportChar.Location = new System.Drawing.Point(622, 237);
+            this.comboBoxReportChar.Location = new System.Drawing.Point(622, 258);
             this.comboBoxReportChar.Name = "comboBoxReportChar";
             this.comboBoxReportChar.Size = new System.Drawing.Size(150, 25);
             this.comboBoxReportChar.TabIndex = 11;
@@ -159,7 +160,7 @@
             // label5
             // 
             this.label5.AutoSize = true;
-            this.label5.Location = new System.Drawing.Point(569, 240);
+            this.label5.Location = new System.Drawing.Point(569, 261);
             this.label5.Name = "label5";
             this.label5.Size = new System.Drawing.Size(47, 17);
             this.label5.TabIndex = 12;
@@ -167,7 +168,7 @@
             // 
             // textBoxWriteData
             // 
-            this.textBoxWriteData.Location = new System.Drawing.Point(622, 268);
+            this.textBoxWriteData.Location = new System.Drawing.Point(622, 289);
             this.textBoxWriteData.Name = "textBoxWriteData";
             this.textBoxWriteData.Size = new System.Drawing.Size(150, 24);
             this.textBoxWriteData.TabIndex = 13;
@@ -175,7 +176,7 @@
             // 
             // textBoxReadData
             // 
-            this.textBoxReadData.Location = new System.Drawing.Point(622, 298);
+            this.textBoxReadData.Location = new System.Drawing.Point(622, 319);
             this.textBoxReadData.Name = "textBoxReadData";
             this.textBoxReadData.ReadOnly = true;
             this.textBoxReadData.Size = new System.Drawing.Size(150, 24);
@@ -183,7 +184,7 @@
             // 
             // buttonDisconnect
             // 
-            this.buttonDisconnect.Location = new System.Drawing.Point(652, 344);
+            this.buttonDisconnect.Location = new System.Drawing.Point(652, 365);
             this.buttonDisconnect.Name = "buttonDisconnect";
             this.buttonDisconnect.Size = new System.Drawing.Size(120, 25);
             this.buttonDisconnect.TabIndex = 17;
@@ -192,7 +193,7 @@
             // 
             // buttonDongleReset
             // 
-            this.buttonDongleReset.Location = new System.Drawing.Point(652, 375);
+            this.buttonDongleReset.Location = new System.Drawing.Point(652, 396);
             this.buttonDongleReset.Name = "buttonDongleReset";
             this.buttonDongleReset.Size = new System.Drawing.Size(120, 25);
             this.buttonDongleReset.TabIndex = 18;
@@ -201,7 +202,7 @@
             // 
             // buttonConnect
             // 
-            this.buttonConnect.Location = new System.Drawing.Point(652, 194);
+            this.buttonConnect.Location = new System.Drawing.Point(408, 11);
             this.buttonConnect.Name = "buttonConnect";
             this.buttonConnect.Size = new System.Drawing.Size(120, 25);
             this.buttonConnect.TabIndex = 20;
@@ -210,7 +211,7 @@
             // 
             // buttonWrite
             // 
-            this.buttonWrite.Location = new System.Drawing.Point(568, 268);
+            this.buttonWrite.Location = new System.Drawing.Point(568, 289);
             this.buttonWrite.Name = "buttonWrite";
             this.buttonWrite.Size = new System.Drawing.Size(48, 25);
             this.buttonWrite.TabIndex = 21;
@@ -219,7 +220,7 @@
             // 
             // buttonRead
             // 
-            this.buttonRead.Location = new System.Drawing.Point(568, 297);
+            this.buttonRead.Location = new System.Drawing.Point(568, 318);
             this.buttonRead.Name = "buttonRead";
             this.buttonRead.Size = new System.Drawing.Size(48, 25);
             this.buttonRead.TabIndex = 22;
@@ -243,10 +244,20 @@
             this.comboBoxDiscovered.Size = new System.Drawing.Size(300, 25);
             this.comboBoxDiscovered.TabIndex = 23;
             // 
+            // buttonScanStop
+            // 
+            this.buttonScanStop.Location = new System.Drawing.Point(652, 194);
+            this.buttonScanStop.Name = "buttonScanStop";
+            this.buttonScanStop.Size = new System.Drawing.Size(120, 25);
+            this.buttonScanStop.TabIndex = 25;
+            this.buttonScanStop.Text = "Scan stop";
+            this.buttonScanStop.UseVisualStyleBackColor = true;
+            // 
             // Form1
             // 
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.None;
             this.ClientSize = new System.Drawing.Size(784, 461);
+            this.Controls.Add(this.buttonScanStop);
             this.Controls.Add(this.label6);
             this.Controls.Add(this.comboBoxDiscovered);
             this.Controls.Add(this.buttonRead);
@@ -301,6 +312,7 @@
         private System.Windows.Forms.Button buttonRead;
         private System.Windows.Forms.Label label6;
         private System.Windows.Forms.ComboBox comboBoxDiscovered;
+        private System.Windows.Forms.Button buttonScanStop;
     }
 }
 

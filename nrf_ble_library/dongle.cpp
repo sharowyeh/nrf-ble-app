@@ -68,6 +68,7 @@ enum _uint_ms
 /** Global variables */
 static ble_gap_addr_t  m_connected_addr = { 0 }; /* intent or connected peripheral address */
 static bool        m_is_connected = false; /* peripheral address has been connected(BLE_GAP_EVT_DISCONNECTED) */
+static char        m_passkey[6] = { '1', '2', '3', '4', '5', '6' }; /* default fixed passkey for auth request(BLE_GAP_EVT_AUTH_KEY_REQUEST) */
 static bool	       m_is_authenticated = false; /* peripheral address has been authenticated(BLE_GAP_EVT_AUTH_STATUS) */
 static uint8_t     m_connected_devices = 0; /* number of connected devices */
 static uint16_t    m_connection_handle = 0;
@@ -107,10 +108,15 @@ static std::map <uint16_t, data_t> m_read_data; /* handle, p_data, data_len */
 static std::map<uint16_t, data_t> m_write_data; /* handle, p_data, data_len */
 
 static char m_log_msg[4096] = { 0 };
-static log_level_t m_log_level = LOG_INFO;
+static log_level_t m_log_level = LOG_DEBUG;
 
-std::mutex m_mtx;
-std::condition_variable m_cond;
+/* Mutex and condition variable for data read/write */
+std::mutex m_mtx_read_write;
+std::condition_variable m_cond_read_write;
+
+/* Mutex and condition variable for helper function device_find */
+std::mutex m_mtx_find;
+std::condition_variable m_cond_find;
 
 #if NRF_SD_BLE_API >= 5
 static uint32_t    m_config_id = 1;
@@ -309,11 +315,11 @@ static void ble_address_to_string_convert(ble_gap_addr_t address, uint8_t * stri
 	}
 }
 
-static void ble_address_to_uint64_convert(ble_gap_addr_t address, uint64_t *number)
+static void ble_address_to_uint64_convert(uint8_t addr[BLE_GAP_ADDR_LEN], uint64_t *number)
 {
 	for (int i = BLE_GAP_ADDR_LEN - 1; i >= 0; --i)
 	{
-		*number += (uint64_t)address.addr[i] << (i * 8);
+		*number += (uint64_t)addr[i] << (i * 8);
 	}
 }
 
@@ -506,6 +512,8 @@ static void connection_cleanup() {
 	m_battery_level_handle = 0;
 	m_char_list.clear();
 	m_char_idx = 0;
+	m_cond_read_write.notify_all();
+	m_cond_find.notify_all();
 }
 
 #pragma endregion
@@ -558,11 +566,11 @@ uint32_t scan_stop() {
 	error_code = sd_ble_gap_scan_stop(m_adapter);
 
 	if (error_code != NRF_SUCCESS) {
-		sprintf_s(m_log_msg, "Scan start failed, code: %d", error_code);
+		sprintf_s(m_log_msg, "Scan stop failed, code: %d", error_code);
 		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
 	}
 	else {
-		sprintf_s(m_log_msg, "Scan started");
+		sprintf_s(m_log_msg, "Scan stop");
 		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 	}
 
@@ -610,8 +618,13 @@ uint32_t conn_start(uint8_t addr_type, uint8_t addr[6])
 	return err_code;
 }
 
-uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps)
+uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps, const char* passkey)
 {
+	// update fixed passkey
+	if (passkey) {
+		memcpy_s(m_passkey, 6, passkey, 6);
+	}
+
 	uint32_t error_code;
 
 	// try to get security mode before authenticate
@@ -783,6 +796,9 @@ static uint32_t set_cccd_notification(uint16_t handle)
 				count++;
 			}
 		}
+
+		m_cond_find.notify_all();
+
 		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_ENABLED]) {
 			// return number of characteristics
 			((fn_on_service_enabled)fn)(count);
@@ -842,6 +858,113 @@ uint32_t service_enable_start() {
 	return 0;
 }
 
+uint32_t device_find(uint8_t addr[6], int8_t rssi, const char* passkey, uint16_t timeout) {
+	uint32_t error_code = 0;
+
+	error_code = dongle_disconnect();
+	if (error_code == NRF_SUCCESS) {
+		std::unique_lock<std::mutex> lck{ m_mtx_find };
+		auto stat = m_cond_find.wait_for(lck, std::chrono::milliseconds(timeout));
+		if (stat == std::cv_status::timeout) {
+			return NRF_ERROR_TIMEOUT;
+		}
+	}
+
+	error_code = scan_stop();
+
+	error_code = scan_start(200, 50, true, 0);
+	if (error_code != NRF_SUCCESS) {
+		return error_code;
+	}
+
+	auto target = m_adv_list.end();
+	int32_t elapsed = 0;
+	while (elapsed < timeout) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		elapsed += 100;
+		target = m_adv_list.begin();
+		for (; target != m_adv_list.end(); target++) {
+			if (target->second.rssi < rssi)
+				continue;
+			if (addr != NULL) {
+				uint64_t addr_num = 0;
+				ble_address_to_uint64_convert(addr, &addr_num);
+				if (target->first == addr_num) {
+					break;
+				}
+			}
+			else {
+				// ignore address check
+				break;
+			}
+		}
+		if (target != m_adv_list.end()) {
+			break;
+		}
+	}
+
+	if (elapsed >= timeout || target == m_adv_list.end()) {
+		return NRF_ERROR_TIMEOUT;
+	}
+
+	error_code = conn_start(target->second.peer_addr.addr_type, target->second.peer_addr.addr);
+	if (error_code != NRF_SUCCESS) {
+		return error_code;
+	}
+	// until on_connected
+	std::unique_lock<std::mutex> lck{ m_mtx_find };
+	auto stat = m_cond_find.wait_for(lck, std::chrono::milliseconds(timeout));
+	if (stat == std::cv_status::timeout) {
+		return NRF_ERROR_TIMEOUT;
+	}
+
+	error_code = auth_start(true, false, 0x2, passkey);
+	if (error_code != NRF_SUCCESS) {
+		return error_code;
+	}
+	// until BLE_GAP_EVT_AUTH_STATUS
+	stat = m_cond_find.wait_for(lck, std::chrono::milliseconds(timeout));
+	if (stat == std::cv_status::timeout) {
+		return NRF_ERROR_TIMEOUT;
+	}
+	
+	typedef struct {
+		unsigned short uuid;
+		unsigned short type;
+	} service;
+
+	int service_idx = 0;
+	std::vector<service> service_list = {
+		{ 0x1800, 0x01 },
+		{ 0x180F, 0x01 },
+		{ 0x1812, 0x01 }
+	};
+
+	for (int i = 0; i < 3; i++) {
+		error_code = service_discovery_start(service_list[i].uuid, service_list[i].type);
+		if (error_code != NRF_SUCCESS) {
+			return error_code;
+		}
+		// until any of before invoking FN_ON_SERVICE_DISCOVERED callback
+		stat = m_cond_find.wait_for(lck, std::chrono::milliseconds(timeout));
+		if (stat == std::cv_status::timeout) {
+			return NRF_ERROR_TIMEOUT;
+		}
+	}
+
+	error_code = service_enable_start();
+	if (error_code != NRF_SUCCESS) {
+		return error_code;
+	}
+	// until FN_ON_SERVICE_ENABLED
+	stat = m_cond_find.wait_for(lck, std::chrono::milliseconds(timeout));
+	if (stat == std::cv_status::timeout) {
+		return NRF_ERROR_TIMEOUT;
+	}
+
+	return NRF_SUCCESS;
+}
+
 uint32_t report_char_list(uint16_t *handle_list, uint8_t *refs_list, uint16_t *len) {
 	if (handle_list == 0 || refs_list == 0 || len == 0) {
 		return NRF_ERROR_INVALID_PARAM;
@@ -878,8 +1001,8 @@ uint32_t data_read(uint16_t handle, uint8_t *data, uint16_t *len)
 		return error_code;
 	}
 
-	std::unique_lock<std::mutex> lck{ m_mtx };
-	auto stat = m_cond.wait_for(lck, std::chrono::milliseconds(2000));
+	std::unique_lock<std::mutex> lck{ m_mtx_read_write };
+	auto stat = m_cond_read_write.wait_for(lck, std::chrono::milliseconds(2000));
 	if (stat == std::cv_status::timeout) {
 		return NRF_ERROR_TIMEOUT;
 	}
@@ -932,8 +1055,8 @@ uint32_t data_write(uint16_t handle, uint8_t *data, uint16_t len)
 		return error_code;
 	}
 
-	std::unique_lock<std::mutex> lck{ m_mtx };
-	auto stat = m_cond.wait_for(lck, std::chrono::milliseconds(2000));
+	std::unique_lock<std::mutex> lck{ m_mtx_read_write };
+	auto stat = m_cond_read_write.wait_for(lck, std::chrono::milliseconds(2000));
 	if (stat == std::cv_status::timeout) {
 		return NRF_ERROR_TIMEOUT;
 	}
@@ -1019,7 +1142,7 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 		return;
 
 	uint64_t addr_num = 0;
-	ble_address_to_uint64_convert(p_ble_gap_evt->params.adv_report.peer_addr, &addr_num);
+	ble_address_to_uint64_convert((uint8_t *)p_ble_gap_evt->params.adv_report.peer_addr.addr, &addr_num);
 
 	// list always up-to-date, report to caller if new arrival or rssi updated
 	//bool new_arrival = (m_adv_list.find(addr_num) == m_adv_list.end());
@@ -1094,6 +1217,7 @@ static void on_timeout(const ble_gap_evt_t * const p_ble_gap_evt)
 		//DEBUG: may not restart scan action
 		//scan_start();
 	}
+	connection_cleanup();
 }
 
 /**@brief Function called on BLE_GAP_EVT_CONNECTED event.
@@ -1119,6 +1243,8 @@ static void on_connected(const ble_gap_evt_t * const p_ble_gap_evt)
 		}
 	}
 	m_is_connected = match;
+
+	m_cond_find.notify_all();
 
 	for (auto &fn : m_callback_fn_list[FN_ON_CONNECTED]) {
 		((fn_on_connected)fn)(m_connected_addr.addr_type, m_connected_addr.addr);
@@ -1212,6 +1338,8 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
 			p_ble_gattc_evt->gatt_status, count);
 		log_handler(m_adapter, SD_RPC_LOG_WARNING, m_log_msg);
 
+		m_cond_find.notify_all();
+
 		// invoke callback to caller when serviec discovery terminated
 		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_DISCOVERED]) {
 			((fn_on_service_discovered)fn)(m_service_start_handle, m_char_list.size());
@@ -1273,6 +1401,8 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 	{
 		sprintf_s(m_log_msg, " Descriptor discovery failed or empty, code 0x%X count=%d", p_ble_gattc_evt->gatt_status, count);
 		log_handler(m_adapter, SD_RPC_LOG_WARNING, m_log_msg);
+
+		m_cond_find.notify_all();
 
 		// invoke callback to caller when serviec discovery terminated
 		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_DISCOVERED]) {
@@ -1346,6 +1476,9 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 		char_discovery_start(range);
 	}
 	else {
+
+		m_cond_find.notify_all();
+
 		// invoke callback to caller when all characteristics discovered
 		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_DISCOVERED]) {
 			((fn_on_service_discovered)fn)(m_service_start_handle, m_char_list.size());
@@ -1431,7 +1564,7 @@ static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg); //TODO: or warning?
 		//TODO: do something next if any error occurred
 
-		m_cond.notify_all();
+		m_cond_read_write.notify_all();
 		return;
 	}
 
@@ -1451,7 +1584,7 @@ static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 	memcpy_s(m_read_data[rsp_handle].p_data, DATA_BUFFER_SIZE, p_data + offset, len);
 	m_read_data[rsp_handle].data_len = len;
 	// release lock for data_read()
-	m_cond.notify_all();
+	m_cond_read_write.notify_all();
 
 	// check handle is report reference descriptor, to read the next report reference.
 	//ASSERT: rsp_handle == m_char_list[m_char_idx].report_ref_handle
@@ -1479,7 +1612,7 @@ static void on_write_response(const ble_gattc_evt_t * const p_ble_gattc_evt)
 		sprintf_s(m_log_msg, "Error. Write operation failed or data empty. handle 0x%04X code 0x%X",
 			rsp_handle, p_ble_gattc_evt->gatt_status);
 		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg); //TODO: or warning?
-		m_cond.notify_all();
+		m_cond_read_write.notify_all();
 		return;
 	}
 
@@ -1496,7 +1629,7 @@ static void on_write_response(const ble_gattc_evt_t * const p_ble_gattc_evt)
 	memcpy_s(m_write_data[rsp_handle].p_data, DATA_BUFFER_SIZE, p_data + offset, len);
 	m_write_data[rsp_handle].data_len = len;
 	// release lock for data_write()
-	m_cond.notify_all();
+	m_cond_read_write.notify_all();
 
 	// check handle is CCCD, to set the next CCCD notification.
 	//ASSERT: rsp_handle == m_char_list[m_char_idx].cccd_handle
@@ -1705,6 +1838,8 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 			
 			m_is_authenticated = true;
 
+			m_cond_find.notify_all();
+			
 			// NOTICE: let caller decide the next action, can wait util conn param updated to discover service
 			//         or do immediately after authentication completed
 			for (auto &fn : m_callback_fn_list[FN_ON_AUTHENTICATED]) {
@@ -1728,9 +1863,8 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		uint8_t *key = NULL;
 		// provide fixed passkey
 		if (key_type == BLE_GAP_AUTH_KEY_TYPE_PASSKEY) {
-			uint8_t passkey[6] = { '1','2','3','4','5','6' };
-			key = &passkey[0];
-			sprintf_s(m_log_msg, " use 123456 for passkey");
+			key = (uint8_t*)&m_passkey[0];
+			sprintf_s(m_log_msg, " use %s for passkey", m_passkey);
 			log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
 		}
 		else if (key_type == BLE_GAP_AUTH_KEY_TYPE_OOB) {
@@ -1744,7 +1878,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 
 		if (m_callback_fn_list[FN_ON_PASSKEY_REQUIRED].size() > 0) {
-			std::string str = std::string((char*)key, 6);
+			std::string str = std::string(m_passkey);
 			for (auto &fn : m_callback_fn_list[FN_ON_PASSKEY_REQUIRED]) {
 				((fn_on_passkey_required)fn)(str.c_str());
 			}
@@ -1757,7 +1891,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		uint8_t key[6] = { 0 };
 		memcpy_s(&key[0], 6, p_ble_evt->evt.gap_evt.params.passkey_display.passkey, 6);
 		sprintf_s(m_log_msg, " on passkey display, key: ");
-		for (int i = 0; i < 6; i++)
+		for (int i = 0; i < 6 && key[i]; i++)
 			strcat_s(m_log_msg, (char*)key[i]);
 		log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
 

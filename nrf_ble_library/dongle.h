@@ -59,11 +59,17 @@ EXTERNC NRFBLEAPI uint32_t dongle_init(char* serial_port, uint32_t baud_rate);
 EXTERNC NRFBLEAPI uint32_t scan_start(float interval, float window, bool active, uint16_t timeout);
 EXTERNC NRFBLEAPI uint32_t scan_stop();
 EXTERNC NRFBLEAPI uint32_t conn_start(uint8_t addr_type, uint8_t addr[6]);
-/*io_caps:0x2(BLE_GAP_IO_CAPS_KEYBOARD_ONLY)*/
-EXTERNC NRFBLEAPI uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps);
+/*io_caps:0x2(BLE_GAP_IO_CAPS_KEYBOARD_ONLY), passkey:assign 6 digits string or given NULL will be default "123456"*/
+EXTERNC NRFBLEAPI uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps, const char* passkey);
 EXTERNC NRFBLEAPI uint32_t service_discovery_start(uint16_t uuid, uint8_t type);
 /* read all report reference and set CCCD notification */
 EXTERNC NRFBLEAPI uint32_t service_enable_start();
+/* helper synchronous funtion for scan_start->connect_start->auth_start then wait until service enabled 
+addr: adv address(LSB), given NULL only filter by rssi
+rssi: adv rssi level greater then -N
+passkey: 6 digit charactors which peripheral requests passkey to authentication
+timeout: milliseconds from scan_start to services enabled */
+EXTERNC NRFBLEAPI uint32_t device_find(uint8_t addr[6], int8_t rssi, const char* passkey, uint16_t timeout);
 /* report reference characteristics list
 handle_list: pointer of handle array size by given len
 refs_list: pointer of report reference array size by given len*2, will be refs_list[[0,1],[2,3],..] in 1-d

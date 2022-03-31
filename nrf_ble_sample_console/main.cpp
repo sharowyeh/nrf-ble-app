@@ -36,7 +36,7 @@ void on_dev_connected(uint8_t addr_type, uint8_t *addr)
 	connected = true;
 	printf("[main] auth start\n");
 	// NOTICE: service discovery should wait before param updated event or bond for auth secure param(or passkey)
-	auth_start(true, false, 0x2);
+	auth_start(true, false, 0x2, "654321");
 	// than
 	//service_discovery_start();
 }
@@ -209,8 +209,30 @@ void parse_input_command(std::string &line) {
 	}
 }
 
-int main(int argc, char * argv[])
-{	
+// establish central and peripheral communication by given address/rssi with thread blocked timeout
+uint32_t sync_type_start(std::string addr_str, int8_t rssi, uint16_t timeout) {
+
+	callback_add(FN_ON_DISCONNECTED, &on_dev_disconnected);
+	callback_add(FN_ON_FAILED, &on_dev_failed);
+	callback_add(FN_ON_DATA_RECEIVED, &on_dev_data_received);
+
+	printf("[main] ======== sync type start ========\n");
+	uint8_t* addr = NULL;
+	uint8_t addr_lsb[6] = { 0 };
+	if (addr_str.length() == 12) {
+		for (int i = 0; i < 6; i++) {
+			addr_lsb[i] = strtoul(addr_str.substr((5 - i) * 2, 2).c_str(), NULL, 16);
+		}
+		addr = &addr_lsb[0];
+	}
+	uint32_t error_code = device_find(addr, rssi, "123456", timeout);
+	printf("[main] ======== device find %s, code:%d ========\n", (error_code == 0 ? "ok" : "fail"), error_code);
+	return error_code;
+}
+
+// establish central and peripheral communication by callback with target_addr/target_rssi
+int async_type_start() {
+
 	callback_add(FN_ON_DISCOVERED, &on_dev_discovered);
 	callback_add(FN_ON_CONNECTED, &on_dev_connected);
 	callback_add(FN_ON_PASSKEY_REQUIRED, &on_dev_passkey_required);
@@ -221,6 +243,12 @@ int main(int argc, char * argv[])
 	callback_add(FN_ON_FAILED, &on_dev_failed);
 	callback_add(FN_ON_DATA_RECEIVED, &on_dev_data_received);
 
+	uint32_t error_code = scan_start(200, 50, true, 0);
+	return error_code;
+}
+
+int main(int argc, char * argv[])
+{	
 	uint32_t error_code;
 	char     serial_port[10] = "COM3";
 	uint32_t baud_rate = 1000000;
@@ -238,10 +266,10 @@ int main(int argc, char * argv[])
 	if (argc > 4)
 		target_rssi = atoi(argv[4]);
 
-
 	error_code = dongle_init(serial_port, baud_rate);
 
-	error_code = scan_start(200, 50, true, 0);
+	error_code = sync_type_start(target_addr, target_rssi, 30000);
+	//error_code = async_type_start();
 
 	if (error_code != 0)
 	{
@@ -263,7 +291,7 @@ int main(int argc, char * argv[])
 			if (connected) {
 				err = dongle_disconnect();
 				// if success, wait until dongle_disconnect() finished;
-				if (err = 0) {
+				if (err == 0) {
 					std::unique_lock<std::mutex> lck{ mtx };
 					cond.wait(lck);
 				}

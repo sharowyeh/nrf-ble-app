@@ -25,9 +25,8 @@ namespace NrfBLESampleWinform
         public FnOnDataSent fnOnDataSent;
         
         private bool discovered = false;
-        private byte foundAddrType = 0;
-        private byte[] foundAddr = new byte[6];
-        private string foundAddrString = "";
+        private BindingList<AdvertisingData> discoveredList = new BindingList<AdvertisingData>();
+        private AdvertisingData targetDevice = null;
 
         private int serviceIdx = 0;
         private ushort[][] serviceList = {
@@ -41,6 +40,12 @@ namespace NrfBLESampleWinform
         public Form1()
         {
             InitializeComponent();
+
+            // binding discovered list to items of combobox control
+            var binding = new BindingSource();
+            binding.DataSource = discoveredList;
+            comboBoxDiscovered.DataSource = binding.DataSource;
+            comboBoxDiscovered.DisplayMember = "Display";
 
             // assign function to delegate field
             fnOnDiscovered = OnDiscovered;
@@ -70,13 +75,26 @@ namespace NrfBLESampleWinform
             //NrfBLELibrary.DongleInit("COM3", 10000);
             //NrfBLELibrary.ScanStart(200, 50, true, 0);
 
+            comboBoxDiscovered.SelectedIndexChanged += ComboBoxDiscovered_SelectedIndexChanged;
+            
             buttonDongleInit.Click += ButtonDongleInit_Click;
             buttonScanStart.Click += ButtonScanStart_Click;
+            buttonScanStop.Click += ButtonScanStop_Click;
             buttonConnect.Click += ButtonConnect_Click;
             buttonWrite.Click += ButtonWrite_Click;
             buttonRead.Click += ButtonRead_Click;
             buttonDisconnect.Click += ButtonDisconnect_Click;
             buttonDongleReset.Click += ButtonDongleReset_Click;
+        }
+
+        private void ComboBoxDiscovered_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (comboBoxDiscovered.SelectedIndex == -1)
+                return;
+
+            targetDevice = comboBoxDiscovered.SelectedItem as AdvertisingData;
+            if (targetDevice != null)
+                WriteLog($"target {targetDevice.AddrString} selected");
         }
 
         private void ButtonDongleInit_Click(object sender, EventArgs e)
@@ -94,13 +112,23 @@ namespace NrfBLESampleWinform
             WriteLog($"scan start code:{code}, wait...");
         }
 
+        private void ButtonScanStop_Click(object sender, EventArgs e)
+        {
+            var code = NrfBLELibrary.ScanStop();
+            WriteLog($"scan stop code:{code}");
+        }
+
         private void ButtonConnect_Click(object sender, EventArgs e)
         {
-            if (discovered == false)
+            if (targetDevice == null)
                 return;
-            
-            var code = NrfBLELibrary.ConnStart(foundAddrType, foundAddr);
-            WriteLog($"connect {foundAddrString} start code:{code}, wait...");
+
+            // For manually connect by combobox selection,
+            // raise discovered flag prevent discovery callback changing target device
+            discovered = true;
+
+            var code = NrfBLELibrary.ConnStart(targetDevice.AddrType, targetDevice.Addr);
+            WriteLog($"connect {targetDevice.AddrString} start code:{code}, wait...");
         }
 
         private void ButtonWrite_Click(object sender, EventArgs e)
@@ -204,14 +232,14 @@ namespace NrfBLESampleWinform
         private void CleanupData()
         {
             discovered = false;
-            foundAddrType = 0;
-            foundAddr = new byte[6];
+            targetDevice = null;
             connected = false;
             authenticated = false;
             comboBoxDiscovered.Invoke(new Action(() =>
             {
                 label6.Text = "0 Discovered:";
-                comboBoxDiscovered.Items.Clear();
+                discoveredList.Clear();
+                comboBoxReportChar.Items.Clear();
             }));
         }
 
@@ -223,56 +251,40 @@ namespace NrfBLESampleWinform
         private void OnDiscovered(string addrString, string name, byte addrType, byte[] addr, sbyte rssi)
         {
             //WriteLog($"discovered {addrString} {name} rssi:{rssi} type:{addrType}");
+            comboBoxDiscovered.Invoke(new Action(() =>
+            {
+                var exists = discoveredList.Where(d => d.AddrString.Equals(addrString));
+                if (exists.Count() > 0)
+                {
+                    if (string.IsNullOrEmpty(name) == false)
+                        exists.First().Name = name;
+                    exists.First().Rssi = rssi;
+                }
+                else
+                {
+                    discoveredList.Add(new AdvertisingData(addrString, name, addrType, addr, rssi));
+                }
+                label6.Text = $"{discoveredList.Count} Discovered:";
+            }));
 
             string targetAddrString = (string)textBoxAddress.Invoke(
                 new Func<string>(() => { return textBoxAddress.Text; }));
             string targetRssi = (string)textBoxRssi.Invoke(
                 new Func<string>(() => { return textBoxRssi.Text; }));
-
-            comboBoxDiscovered.Invoke(new Action(() =>
-            {
-                bool isUpdate = false;
-                for (int i = 0; i < comboBoxDiscovered.Items.Count; i++)
-                {
-                    if (((string)comboBoxDiscovered.Items[i]).Contains(addrString))
-                    {
-                        comboBoxDiscovered.Items[i] = $"{addrString} {name} {rssi}";
-                        isUpdate = true;
-                        break;
-                    }
-                }
-                if (isUpdate == false)
-                {
-                    comboBoxDiscovered.Items.Add($"{addrString} {name} {rssi}");
-                    label6.Text = $"{comboBoxDiscovered.Items.Count} Discovered:";
-                }
-            }));
             
-
             if (rssi < sbyte.Parse(targetRssi) || discovered)
                 return;
 
-            if (string.IsNullOrWhiteSpace(targetAddrString) ||
-                addrString.Equals(targetAddrString))
+            if (targetAddrString.Length < 12 || addrString.Equals(targetAddrString))
             {
                 var code = NrfBLELibrary.ScanStop();
-                WriteLog($"scan stop code:{code}");
+                WriteLog($"target found, scan stop code:{code}");
                 discovered = true;
-                foundAddrType = addrType;
-                Array.Copy(addr, foundAddr, 6);
-                foundAddrString = addrString;
 
                 comboBoxDiscovered.Invoke(new Action(() =>
                 {
-                    for (int i = 0; i < comboBoxDiscovered.Items.Count; i++)
-                    {
-                        if (((string)comboBoxDiscovered.Items[i]).Contains(addrString))
-                        {
-                            comboBoxDiscovered.Items[i] = $"{addrString} {name} {rssi}";
-                            comboBoxDiscovered.SelectedIndex = i;
-                            break;
-                        }
-                    }
+                    targetDevice = discoveredList.Where(d => d.AddrString.Equals(addrString)).First();
+                    comboBoxDiscovered.SelectedItem = targetDevice;
                 }));
 
                 WriteLog($"=== {addrString} {name} {rssi} match, ready to connect ===");
@@ -285,7 +297,7 @@ namespace NrfBLESampleWinform
         {
             connected = true;
             WriteLog($"connected, auth start");
-            NrfBLELibrary.AuthStart(true, false, 0x2);
+            NrfBLELibrary.AuthStart(true, false, 0x2, "456789");
         }
 
         private void OnPasskeyRequired(string passkey)
@@ -372,5 +384,30 @@ namespace NrfBLESampleWinform
 
         #endregion
 
+    }
+
+    public class AdvertisingData
+    {
+        public string AddrString { get; set; }
+        public string Name { get; set; }
+        public byte AddrType { get; set; }
+        public byte[] Addr { get; set; }
+        public sbyte Rssi { get; set; }
+        public string Display
+        {
+            get
+            {
+                return $"{(AddrString == null ? "" : AddrString)} {(Name == null ? "" : Name)} {Rssi}";
+            }
+        }
+        public AdvertisingData(string addrString, string name, byte addrType, byte[] addr, sbyte rssi)
+        {
+            AddrString = addrString;
+            Name = name;
+            AddrType = addrType;
+            Addr = new byte[6];
+            Array.Copy(addr, Addr, 6);
+            Rssi = rssi;
+        }
     }
 }

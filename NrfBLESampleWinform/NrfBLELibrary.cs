@@ -88,7 +88,8 @@ namespace NrfBLESampleWinform
             [MarshalAs(UnmanagedType.LPArray, SizeConst = 6)]byte[] addr);
 
         [DllImport("nrf_ble_library.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi, EntryPoint = "auth_start")]
-        public static extern uint AuthStart(bool bond, bool keypress, byte ioCaps);
+        public static extern uint AuthStart(bool bond, bool keypress, byte ioCaps, 
+            [MarshalAs(UnmanagedType.LPStr, SizeConst = 6)]string passkey);
 
         [DllImport("nrf_ble_library.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi, EntryPoint = "service_discovery_start")]
         public static extern uint ServiceDiscoveryStart(ushort uuid, byte type);
