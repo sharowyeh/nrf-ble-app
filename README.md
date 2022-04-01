@@ -6,7 +6,7 @@ Note for my unreliable memory:
 - original source code references from nrf-ble-driver example code and firmware testcases
 
 ### Environment requirement ###
-- nRF5xDK board(PCA10069) support SoftDevice s132 or later version, refer to [IC description](https://github.com/NordicSemiconductor/pc-ble-driver/tree/master#softdevice-and-ic) section on offical github site
+- nRF5xDK board(PCA10059) support SoftDevice s132 or later version, refer to [IC description](https://github.com/NordicSemiconductor/pc-ble-driver/tree/master#softdevice-and-ic) section on offical github site
 - Nordic connectivity firmware release binary [v4.1.4](https://github.com/NordicSemiconductor/pc-ble-driver/tree/v4.1.4-hex/hex/sd_api_v5) or v4.1.2 with api_v5, can be downloaded from offical github source file
 - pc-ble-driver development dependencies v4.1.2(or v4.1.4), can be downloaded from [pc-ble-driver/releases](https://github.com/NordicSemiconductor/pc-ble-driver/releases)
 This project references v4.1.2 header and lib files, but programmed v4.1.4 firmware to dev kit will get better data stacks performance, while receving continueous packets from peripheral device
@@ -46,7 +46,7 @@ refer steps as below:
 - Install nrfconnect-setup-3.8.0.exe
 - Download Bluetooth Low Energy app(offical, v3.0.0), or extract pc-nrfconnect-ble_3.0.0_offical.zip(if backup for offline) to *<user_dir>*/.nrfconnect-apps/node_modules/ , naming folder to **pc-nrfconnect-ble** 
 - Launch nRF Connect for Desktop, will show Bluetooth Low Energy(offical, v3.0.0) on apps list
-- Plug nRF5DK board(PCA10069) in USB port
+- Plug nRF5DK board(PCA10059) in USB port
 - Open Bluetooth Low Energy app than select device, it will ask the device must be programmed
 - Proceed firmware programming, log window will show up Nordic connectivity version and detailed information
 
