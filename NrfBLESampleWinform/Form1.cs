@@ -150,6 +150,7 @@ namespace NrfBLESampleWinform
                 return;
             }
 
+            uint result = 0xff;
             var args = ((string)comboBoxReportChar.SelectedItem).Split(' ');
             if (args.Length == 3)
             {
@@ -157,14 +158,15 @@ namespace NrfBLESampleWinform
                     byte.Parse(args[0], System.Globalization.NumberStyles.HexNumber),
                     byte.Parse(args[1], System.Globalization.NumberStyles.HexNumber),
                 };
-                NrfBLELibrary.DataWriteByReportRef(refs, data, (ushort)data.Length);
+                result = NrfBLELibrary.DataWriteByReportRef(refs, data, (ushort)data.Length, 2000);
             }
             else if (args.Length == 1)
             {
                 var handle = ushort.Parse(args[0], System.Globalization.NumberStyles.HexNumber);
-                NrfBLELibrary.DataWrite(handle, data, (ushort)data.Length);
+                result = NrfBLELibrary.DataWrite(handle, data, (ushort)data.Length, 2000);
             }
 
+            WriteLog($"data write res:{result}");
         }
 
         private void ButtonRead_Click(object sender, EventArgs e)
@@ -175,6 +177,7 @@ namespace NrfBLESampleWinform
             byte[] data = new byte[NrfBLELibrary.DATA_BUFFER_SIZE];
             ushort len = NrfBLELibrary.DATA_BUFFER_SIZE;
 
+            uint result = 0xff;
             var args = ((string)comboBoxReportChar.SelectedItem).Split(' ');
             if (args.Length == 3)
             {
@@ -182,12 +185,12 @@ namespace NrfBLESampleWinform
                     byte.Parse(args[0], System.Globalization.NumberStyles.HexNumber),
                     byte.Parse(args[1], System.Globalization.NumberStyles.HexNumber),
                 };
-                NrfBLELibrary.DataReadByReportRef(refs, data, ref len);
+                result = NrfBLELibrary.DataReadByReportRef(refs, data, ref len, 2000);
             }
             else if (args.Length == 1)
             {
                 var handle = ushort.Parse(args[0], System.Globalization.NumberStyles.HexNumber);
-                NrfBLELibrary.DataRead(handle, data, ref len);
+                result = NrfBLELibrary.DataRead(handle, data, ref len, 2000);
             }
             else
             {
@@ -196,7 +199,7 @@ namespace NrfBLESampleWinform
             }
 
 
-            var log = $"data read ";
+            var log = $"data read res:{result} data:";
             for (int i = 0; i < len; i++)
             {
                 log += $"{data[i]:x02} ";

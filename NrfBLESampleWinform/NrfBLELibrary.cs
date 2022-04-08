@@ -103,21 +103,28 @@ namespace NrfBLESampleWinform
             [MarshalAs(UnmanagedType.LPArray, SizeConst = DATA_BUFFER_SIZE * 2)]byte[] refs_list, 
             ref ushort len);
 
+        [DllImport("nrf_ble_library.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi, EntryPoint = "data_read_async")]
+        public static extern uint DataReadAsync(ushort handle);
+
         [DllImport("nrf_ble_library.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi, EntryPoint = "data_read")]
         public static extern uint DataRead(ushort handle, 
-            [MarshalAs(UnmanagedType.LPArray, SizeConst = DATA_BUFFER_SIZE)]byte[] data, ref ushort len);
+            [MarshalAs(UnmanagedType.LPArray, SizeConst = DATA_BUFFER_SIZE)]byte[] data, ref ushort len, ushort timeout);
 
         [DllImport("nrf_ble_library.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi, EntryPoint = "data_read_by_report_ref")]
         public static extern uint DataReadByReportRef(byte[] reportRef,
-            [MarshalAs(UnmanagedType.LPArray, SizeConst = DATA_BUFFER_SIZE)]byte[] data, ref ushort len);
+            [MarshalAs(UnmanagedType.LPArray, SizeConst = DATA_BUFFER_SIZE)]byte[] data, ref ushort len, ushort timeout);
+
+        [DllImport("nrf_ble_library.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi, EntryPoint = "data_write_async")]
+        public static extern uint DataWriteAsync(ushort handle,
+            [MarshalAs(UnmanagedType.LPArray, SizeConst = DATA_BUFFER_SIZE)] byte[] data, ushort len);
 
         [DllImport("nrf_ble_library.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi, EntryPoint = "data_write")]
         public static extern uint DataWrite(ushort handle,
-            [MarshalAs(UnmanagedType.LPArray, SizeConst = DATA_BUFFER_SIZE)]byte[] data, ushort len);
+            [MarshalAs(UnmanagedType.LPArray, SizeConst = DATA_BUFFER_SIZE)]byte[] data, ushort len, ushort timeout);
 
         [DllImport("nrf_ble_library.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi, EntryPoint = "data_write_by_report_ref")]
         public static extern uint DataWriteByReportRef(byte[] reportRef,
-            [MarshalAs(UnmanagedType.LPArray, SizeConst = DATA_BUFFER_SIZE)]byte[] data, ushort len);
+            [MarshalAs(UnmanagedType.LPArray, SizeConst = DATA_BUFFER_SIZE)]byte[] data, ushort len, ushort timeout);
 
         [DllImport("nrf_ble_library.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi, EntryPoint = "dongle_disconnect")]
         public static extern uint DongleDisconnect();

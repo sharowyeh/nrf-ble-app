@@ -278,6 +278,9 @@ static void log_level(log_level_t level, const char *message, ...) {
  */
 static void log_handler(adapter_t * adapter, sd_rpc_log_severity_t severity, const char * message)
 {
+	// since additionally use the log_handler callback as generic function, check adapter pointer required
+	if (adapter == NULL)
+		return;
 	// log_level_t is aligned to sd_rpc_log_severity_t
 	log_level((log_level_t)severity, message);
 }
@@ -527,6 +530,9 @@ static void connection_cleanup() {
  */
 uint32_t scan_start(float interval, float window, bool active, uint16_t timeout)
 {
+	if (m_adapter == NULL)
+		return NRF_ERROR_INVALID_STATE;
+
 	//m_discovered_report = { 0 };
 	m_adv_list.clear();
 
@@ -560,7 +566,10 @@ uint32_t scan_start(float interval, float window, bool active, uint16_t timeout)
 	return error_code;
 }
 
-uint32_t scan_stop() {
+uint32_t scan_stop()
+{
+	if (m_adapter == NULL)
+		return NRF_ERROR_INVALID_STATE;
 
 	uint32_t error_code = 0;
 	error_code = sd_ble_gap_scan_stop(m_adapter);
@@ -579,6 +588,9 @@ uint32_t scan_stop() {
 
 uint32_t conn_start(uint8_t addr_type, uint8_t addr[6])
 {
+	if (m_adapter == NULL)
+		return NRF_ERROR_INVALID_STATE;
+
 	// cleanup previous data
 	connection_cleanup();
 
@@ -620,6 +632,9 @@ uint32_t conn_start(uint8_t addr_type, uint8_t addr[6])
 
 uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps, const char* passkey)
 {
+	if (m_adapter == NULL)
+		return NRF_ERROR_INVALID_STATE;
+
 	// update fixed passkey
 	if (passkey) {
 		memcpy_s(m_passkey, 6, passkey, 6);
@@ -661,6 +676,9 @@ uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps, const char* passk
  */
 uint32_t service_discovery_start(uint16_t uuid, uint8_t type)
 {
+	if (m_adapter == NULL)
+		return NRF_ERROR_INVALID_STATE;
+
 	uint32_t   err_code;
 	uint16_t   start_handle = 0x01;
 	ble_uuid_t srvc_uuid;
@@ -694,6 +712,9 @@ uint32_t service_discovery_start(uint16_t uuid, uint8_t type)
  */
 static uint32_t char_discovery_start(ble_gattc_handle_range_t handle_range)
 {
+	if (m_adapter == NULL)
+		return NRF_ERROR_INVALID_STATE;
+
 	if (handle_range.start_handle == 0 && handle_range.end_handle == 0) {
 		handle_range.start_handle = m_service_start_handle;
 		handle_range.end_handle = m_service_end_handle;
@@ -714,6 +735,9 @@ static uint32_t char_discovery_start(ble_gattc_handle_range_t handle_range)
  */
 static uint32_t descr_discovery_start(ble_gattc_handle_range_t handle_range)
 {
+	if (m_adapter == NULL)
+		return NRF_ERROR_INVALID_STATE;
+
 	if (handle_range.start_handle == 0 && handle_range.end_handle == 0) {
 		handle_range.start_handle = m_service_start_handle;
 		handle_range.end_handle = m_service_end_handle;
@@ -731,6 +755,9 @@ read device name from GAP which handle_value in m_char_list(handle in desc_list)
 */
 static uint32_t read_device_name()
 {
+	if (m_adapter == NULL)
+		return NRF_ERROR_INVALID_STATE;
+
 	uint32_t error_code = 0;
 	// use m_device_name_handle or find BLE_UUID_GAP_CHARACTERISTIC_DEVICE_NAME in desc_list
 	uint16_t value_handle = m_device_name_handle;
@@ -750,6 +777,9 @@ writting behavior works with on_write_response() and m_service_start_handle
 */
 static uint32_t set_cccd_notification(uint16_t handle)
 {
+	if (m_adapter == NULL)
+		return NRF_ERROR_INVALID_STATE;
+
 	ble_gattc_write_params_t write_params;
 	uint8_t                  cccd_value[2] = { 1/*enable or disable*/, 0 };
 
@@ -816,6 +846,9 @@ reference data definition: report_id, report_type are defined by FW
 */
 static uint32_t read_report_refs(uint16_t handle)
 {
+	if (m_adapter == NULL)
+		return NRF_ERROR_INVALID_STATE;
+
 	// a flag indicates reading next
 	bool read_next = false;
 	uint32_t error_code = 0;
@@ -965,6 +998,21 @@ uint32_t device_find(uint8_t addr[6], int8_t rssi, const char* passkey, uint16_t
 	return NRF_SUCCESS;
 }
 
+uint32_t device_find_str(const char* addr_str, int8_t rssi, const char* passkey, uint16_t timeout) {
+	uint8_t addr_lsb[6] = { 0 };
+	char hex_str[2] = { 0 };
+	if (strlen(addr_str) >= 12) {
+		for (int i = 0; i < 6; i++) {
+			memcpy_s(hex_str, 2, &addr_str[(5 - i) * 2], 2);
+			addr_lsb[i] = strtoul(hex_str, NULL, 16);
+		}
+	}
+	if (addr_lsb[0] == 0)
+		return NRF_ERROR_INVALID_PARAM;
+	uint32_t error_code = device_find(addr_lsb, rssi, passkey, timeout);
+	return error_code;
+}
+
 uint32_t report_char_list(uint16_t *handle_list, uint8_t *refs_list, uint16_t *len) {
 	if (handle_list == 0 || refs_list == 0 || len == 0) {
 		return NRF_ERROR_INVALID_PARAM;
@@ -982,13 +1030,11 @@ uint32_t report_char_list(uint16_t *handle_list, uint8_t *refs_list, uint16_t *l
 	return NRF_SUCCESS;
 }
 
-uint32_t data_read(uint16_t handle, uint8_t *data, uint16_t *len)
+uint32_t data_read_async(uint16_t handle)
 {
-	if (data == 0)
-		return NRF_ERROR_INVALID_PARAM;
-	if (m_read_data[handle].data_len == 0)
-		return NRF_ERROR_NOT_FOUND;
-	
+	if (m_adapter == NULL)
+		return NRF_ERROR_INVALID_STATE;
+
 	uint32_t error_code = 0;
 	error_code = sd_ble_gattc_read(
 		m_adapter,
@@ -997,15 +1043,28 @@ uint32_t data_read(uint16_t handle, uint8_t *data, uint16_t *len)
 	);
 	sprintf_s(m_log_msg, " Read value from handle:0x%04X code:%d", handle, error_code);
 	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+
+	return error_code;
+}
+
+uint32_t data_read(uint16_t handle, uint8_t *data, uint16_t *len, uint16_t timeout)
+{
+	if (data == NULL || len == NULL || *len == 0)
+		return NRF_ERROR_INVALID_PARAM;
+	
+	uint32_t error_code = data_read_async(handle);
 	if (error_code != NRF_SUCCESS) {
 		return error_code;
 	}
 
 	std::unique_lock<std::mutex> lck{ m_mtx_read_write };
-	auto stat = m_cond_read_write.wait_for(lck, std::chrono::milliseconds(2000));
+	auto stat = m_cond_read_write.wait_for(lck, std::chrono::milliseconds(timeout));
 	if (stat == std::cv_status::timeout) {
 		return NRF_ERROR_TIMEOUT;
 	}
+
+	if (m_read_data[handle].p_data == NULL || m_read_data[handle].data_len == 0)
+		return NRF_ERROR_INVALID_DATA;
 
 	memcpy_s(data, *len, m_read_data[handle].p_data, m_read_data[handle].data_len);
 	*len = std::min(*len, m_read_data[handle].data_len);
@@ -1013,7 +1072,7 @@ uint32_t data_read(uint16_t handle, uint8_t *data, uint16_t *len)
 	return NRF_SUCCESS;
 }
 
-uint32_t data_read_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t *len)
+uint32_t data_read_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t *len, uint16_t timeout)
 {
 	uint16_t handle = 0;
 	for (auto it = m_char_list.begin(); it != m_char_list.end(); it++) {
@@ -1030,11 +1089,17 @@ uint32_t data_read_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t *l
 	sprintf_s(m_log_msg, " Read value handle found: 0x%04X ref:", handle);
 	convert_byte_string((char *)report_ref, 2, &(m_log_msg[strlen(m_log_msg)]));
 	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
-	return data_read(handle, data, len);
+	return data_read(handle, data, len, timeout);
 }
 
-uint32_t data_write(uint16_t handle, uint8_t *data, uint16_t len)
+uint32_t data_write_async(uint16_t handle, uint8_t* data, uint16_t len)
 {
+	if (m_adapter == NULL)
+		return NRF_ERROR_INVALID_STATE;
+
+	if (data == NULL || len == 0)
+		return NRF_ERROR_INVALID_PARAM;
+
 	if (m_write_data[handle].data_len == 0)
 		m_write_data[handle].p_data = (uint8_t*)calloc(DATA_BUFFER_SIZE, sizeof(uint8_t));
 
@@ -1051,12 +1116,22 @@ uint32_t data_write(uint16_t handle, uint8_t *data, uint16_t len)
 	error_code = sd_ble_gattc_write(m_adapter, m_connection_handle, &write_params);
 	sprintf_s(m_log_msg, " Write value to handle:0x%04X code:%d", handle, error_code);
 	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+
+	return error_code;
+}
+
+uint32_t data_write(uint16_t handle, uint8_t *data, uint16_t len, uint16_t timeout)
+{
+	if (data == NULL || len == 0)
+		return NRF_ERROR_INVALID_PARAM;
+
+	uint32_t error_code = data_write_async(handle, data, len);
 	if (error_code != NRF_SUCCESS) {
 		return error_code;
 	}
 
 	std::unique_lock<std::mutex> lck{ m_mtx_read_write };
-	auto stat = m_cond_read_write.wait_for(lck, std::chrono::milliseconds(2000));
+	auto stat = m_cond_read_write.wait_for(lck, std::chrono::milliseconds(timeout));
 	if (stat == std::cv_status::timeout) {
 		return NRF_ERROR_TIMEOUT;
 	}
@@ -1064,7 +1139,7 @@ uint32_t data_write(uint16_t handle, uint8_t *data, uint16_t len)
 	return NRF_SUCCESS;
 }
 
-uint32_t data_write_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t len)
+uint32_t data_write_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t len, uint16_t timeout)
 {
 	uint16_t handle = 0;
 	for (auto it = m_char_list.begin(); it != m_char_list.end(); it++) {
@@ -1081,7 +1156,7 @@ uint32_t data_write_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t l
 	sprintf_s(m_log_msg, " Write value handle found: 0x%04X ref:", handle);
 	convert_byte_string((char *)report_ref, 2, &(m_log_msg[strlen(m_log_msg)]));
 	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
-	return data_write(handle, data, len);
+	return data_write(handle, data, len, timeout);
 }
 
 uint32_t dongle_disconnect() 

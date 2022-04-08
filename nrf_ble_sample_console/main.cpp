@@ -157,7 +157,7 @@ void parse_write_command(std::vector<std::string> split_cmd) {
 		data[i] = strtoul(split_cmd[i + 3].c_str(), nullptr, 16);
 	}
 
-	uint32_t err = data_write_by_report_ref(ref, data, data_len);
+	uint32_t err = data_write_by_report_ref(ref, data, data_len, 2000);
 	printf("[main] write data, code:%d\n", err);
 	fflush(stdout);
 }
@@ -172,7 +172,7 @@ void parse_read_command(std::vector<std::string> split_cmd) {
 	uint8_t data[DATA_BUFFER_SIZE] = { 0 };
 	uint16_t data_len = DATA_BUFFER_SIZE;
 
-	uint32_t err = data_read_by_report_ref(ref, &data[0], &data_len);
+	uint32_t err = data_read_by_report_ref(ref, &data[0], &data_len, 2000);
 	printf("[main] read data, code:%d data:", err);
 	for (int i = 0; i < data_len; i++) {
 		printf("%02x ", data[i]);

@@ -43,9 +43,11 @@ typedef void(*fn_on_discovered)(const char *addr_str, const char *name,
 	uint8_t addr_type, uint8_t addr[6], int8_t rssi);
 typedef void(*fn_on_connected)(uint8_t addr_type, uint8_t addr[6]);
 typedef void(*fn_on_passkey_required)(const char *passkey);
+/* status: refer to BLE_GAP_SEC_STATUS */
 typedef void(*fn_on_authenticated)(uint8_t status);
 typedef void(*fn_on_service_discovered)(uint16_t last_handle, uint16_t char_count);
 typedef void(*fn_on_service_enabled)(uint16_t enabled_count);
+/* reason: refer to BLE_HCI_STATUS_CODES */
 typedef void(*fn_on_disconnected)(uint8_t reason);
 typedef void(*fn_on_failed)(const char *stage); /* failure from connection or authentication */
 typedef void(*fn_on_data_received)(uint16_t handle, uint8_t *data, uint16_t len);
@@ -59,7 +61,8 @@ EXTERNC NRFBLEAPI uint32_t dongle_init(char* serial_port, uint32_t baud_rate);
 EXTERNC NRFBLEAPI uint32_t scan_start(float interval, float window, bool active, uint16_t timeout);
 EXTERNC NRFBLEAPI uint32_t scan_stop();
 EXTERNC NRFBLEAPI uint32_t conn_start(uint8_t addr_type, uint8_t addr[6]);
-/*io_caps:0x2(BLE_GAP_IO_CAPS_KEYBOARD_ONLY), passkey:assign 6 digits string or given NULL will be default "123456"*/
+/*io_caps:0x2(BLE_GAP_IO_CAPS_KEYBOARD_ONLY), 
+passkey:assign 6 digits string or given NULL will be default "123456"*/
 EXTERNC NRFBLEAPI uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps, const char* passkey);
 EXTERNC NRFBLEAPI uint32_t service_discovery_start(uint16_t uuid, uint8_t type);
 /* read all report reference and set CCCD notification */
@@ -70,17 +73,31 @@ rssi: adv rssi level greater then -N
 passkey: 6 digit charactors which peripheral requests passkey to authentication
 timeout: milliseconds from scan_start to services enabled */
 EXTERNC NRFBLEAPI uint32_t device_find(uint8_t addr[6], int8_t rssi, const char* passkey, uint16_t timeout);
+/* overload for device_find with string type BLE address */
+EXTERNC NRFBLEAPI uint32_t device_find_str(const char* addr_str, int8_t rssi, const char* passkey, uint16_t timeout);
 /* report reference characteristics list
 handle_list: pointer of handle array size by given len
 refs_list: pointer of report reference array size by given len*2, will be refs_list[[0,1],[2,3],..] in 1-d
-len: given length of these lists */
+len: given length of these lists, will be modified to actual length after return */
 EXTERNC NRFBLEAPI uint32_t report_char_list(uint16_t *handle_list, uint8_t *refs_list, uint16_t *len);
-EXTERNC NRFBLEAPI uint32_t data_read(uint16_t handle, uint8_t *data, uint16_t *len);
-/*overload for data_read(handle, *data)*/
-EXTERNC NRFBLEAPI uint32_t data_read_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t *len);
-EXTERNC NRFBLEAPI uint32_t data_write(uint16_t handle, uint8_t *data, uint16_t len);
-/*overload for data_write(handle, *data)*/
-EXTERNC NRFBLEAPI uint32_t data_write_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t len);
+
+/* read data from given endpoint handle asynchronously
+retrieve response from fn_on_data_received callback */
+EXTERNC NRFBLEAPI uint32_t data_read_async(uint16_t handle);
+/* overload for data_read_async synchronously waiting read response in timeout ms
+NOTICE: caller thread may be blocked until response or timeout */
+EXTERNC NRFBLEAPI uint32_t data_read(uint16_t handle, uint8_t *data, uint16_t *len, uint16_t timeout);
+/* overload for data_read by report reference data */
+EXTERNC NRFBLEAPI uint32_t data_read_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t *len, uint16_t timeout);
+/* write data to given endpoint handle asynchronously
+retrieve response from fn_on_data_sent callback */
+EXTERNC NRFBLEAPI uint32_t data_write_async(uint16_t handle, uint8_t *data, uint16_t len);
+/* overload for write_data_async synchronously waiting write response in timeout ms
+NOTICE: caller thread may be blocked until response or timeout */
+EXTERNC NRFBLEAPI uint32_t data_write(uint16_t handle, uint8_t *data, uint16_t len, uint16_t timeout);
+/* overload for data_write by report reference data */
+EXTERNC NRFBLEAPI uint32_t data_write_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t len, uint16_t timeout);
+
 /* disconnect action will response status BLE_HCI_LOCAL_HOST_TERMINATED_CONNECTION from BLE_GAP_EVT_DISCONNECTED */
 EXTERNC NRFBLEAPI uint32_t dongle_disconnect();
 /* reset connectivity dongle
