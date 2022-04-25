@@ -73,8 +73,15 @@ The C++ UI example app integrated GLFW via imgui
 - provide interface for win32 app, likes local web api, OS dependent IPC, or so forth
 
 pc-nrfconnect-ble/lib/actions/adapterActions.js
+  - from:
   - adaptertoUse.xxxx
   - pc-ble-driver-js/api/adapter.js
+  - xxxxAction to:
+pc-nrfconnect-ble/lib/reducers/bleEventReducer.js
+  - AdapterActions.DEVICE_xxxx_REQUEST
+pc-nrfconnect-ble/lib/containers/BLEEventDialog.jsx
+  - BLEEventType.xxxx_REQUEST
+  - UI Submit export function xxxx(in adapterActions.js)
 
 pc-nrfconnect-ble/lib/actions/deviceDetailsActions.js
   - adapterToUse.xxxx

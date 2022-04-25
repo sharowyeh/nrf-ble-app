@@ -651,6 +651,11 @@ uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps, const char* passk
 	m_sec_params.bond = bond ? 1 : 0;
 	m_sec_params.keypress = keypress ? 1 : 0;
 	m_sec_params.io_caps = io_caps;
+	m_sec_params.lesc = 1; /* enable LE secure conn */
+	m_sec_params.oob = 1; /* set if has out of band auth data */
+	/* OOB enabled will use OOB method if:
+	- both of devices have out of band(legacy), or
+	- at least one of device has peer OOB data(lesc enabled) */
 
 	// NOTICE: refer to driver, testcase_security.cpp, we'll use the default security params
 	error_code = sd_ble_gap_authenticate(m_adapter, m_connection_handle, &m_sec_params);
@@ -1161,6 +1166,9 @@ uint32_t data_write_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t l
 
 uint32_t dongle_disconnect() 
 {
+	if (m_adapter == NULL)
+		return NRF_ERROR_INVALID_STATE;
+
 	uint32_t error_code = 0;
 	error_code = sd_ble_gap_disconnect(m_adapter, m_connection_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
 	sprintf_s(m_log_msg, "User disconnect, code:%d", error_code);
@@ -1169,7 +1177,10 @@ uint32_t dongle_disconnect()
 	return error_code;
 }
 
-uint32_t dongle_reset() {
+uint32_t dongle_reset()
+{
+	if (m_adapter == NULL)
+		return NRF_ERROR_INVALID_STATE;
 
 	auto error_code = sd_rpc_conn_reset(m_adapter, SOFT_RESET);
 	if (error_code != NRF_SUCCESS)
@@ -1891,6 +1902,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 	}break;
 
 	case BLE_GAP_EVT_SEC_PARAMS_REQUEST:
+		// will compute own pk to reply to peripheral
 		on_sec_params_request(&(p_ble_evt->evt.gap_evt));
 		break;
 
@@ -1932,6 +1944,25 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		}
 	}break;
 
+	case BLE_GAP_EVT_LESC_DHKEY_REQUEST:
+	{
+		// if sd_ble_gap_authenticate lesc = 1
+		sprintf_s(m_log_msg, " on lesc dhkey request, oobd_req=%d, peer_pk0=%d",
+			p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.oobd_req,
+			p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.p_pk_peer->pk[0]);
+		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+		// compute share secret from peer pk
+		ble_gap_lesc_dhkey_t dhkey = { 0 };
+		ecc_p256_compute_sharedsecret(m_private_key, p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.p_pk_peer->pk, dhkey.key);
+		sprintf_s(m_log_msg, " compute ss0=%d", dhkey.key[0]);
+		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+		// sd_ble_gap_lesc_dhkey_reply: reply shared
+		err_code = sd_ble_gap_lesc_dhkey_reply(m_adapter, m_connection_handle, &dhkey);
+		// compute pk(m_public_key is ready by dongle_init)
+		// sd_ble_gap_lesc_oob_data_get: get own oob TODO:
+		// sd_ble_gap_lesc_oob_data_set: set own oob, peer oob(how to?)
+	}break;
+
 	case BLE_GAP_EVT_AUTH_KEY_REQUEST:
 	{
 		uint8_t key_type = p_ble_evt->evt.gap_evt.params.auth_key_request.key_type;
@@ -1944,6 +1975,8 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		}
 		else if (key_type == BLE_GAP_AUTH_KEY_TYPE_OOB) {
 			//TODO: not implemented
+			// sd_ble_gap_lesc_oob_data_get
+			// sd_ble_gap_lesc_oob_data_set
 			sprintf_s(m_log_msg, " on auth key req by OOB not implemented");
 			log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 			break;
