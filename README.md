@@ -68,6 +68,12 @@ The C++ UI example app integrated GLFW via imgui
  |-/glfw-3.3.7.bin.WIN32/...
 ```
 
+### BLE pairing refs ###
+Bluetooth pairing - blog [LESC(p4)](https://www.bluetooth.com/blog/bluetooth-pairing-part-4/), [legacy(p1)](https://www.bluetooth.com/blog/bluetooth-pairing-passkey-entry/), [keygen(p2)](https://www.bluetooth.com/blog/bluetooth-pairing-part-2-key-generation-methods/), [passkey(p3)](https://www.bluetooth.com/blog/bluetooth-pairing-passkey-entry/)
+
+[Deep dive into LESC](https://medium.com/rtone-iot-security/deep-dive-into-bluetooth-le-security-d2301d640bfc)
+
+
 ### Other ways to win32 ###
 - write javascript pc-nrfconnect-ble and pc-ble-driver-js projects from nRF Connect SDK
 - provide interface for win32 app, likes local web api, OS dependent IPC, or so forth

@@ -83,7 +83,7 @@ static adapter_t * m_adapter = NULL;
 static std::map<fn_callback_id_t, std::vector<void*>> m_callback_fn_list;
 
 /* Advertising addresses */
-std::map<uint64_t, ble_gap_evt_adv_report_t> m_adv_list; /*addr, report*/
+static std::map<uint64_t, ble_gap_evt_adv_report_t> m_adv_list; /*addr, report*/
 
 /* Discovered characteristic data structure */
 typedef struct _dev_char_t {
@@ -108,15 +108,20 @@ static std::map <uint16_t, data_t> m_read_data; /* handle, p_data, data_len */
 static std::map<uint16_t, data_t> m_write_data; /* handle, p_data, data_len */
 
 static char m_log_msg[4096] = { 0 };
+#ifdef _DEBUG
 static log_level_t m_log_level = LOG_DEBUG;
+#else
+static log_level_t m_log_level = LOG_INFO;
+#endif
 
 /* Mutex and condition variable for data read/write */
-std::mutex m_mtx_read_write;
-std::condition_variable m_cond_read_write;
+static std::mutex m_mtx_read_write;
+static std::condition_variable m_cond_read_write;
+static std::unique_lock<std::mutex> m_lck{ m_mtx_read_write };
 
 /* Mutex and condition variable for helper function device_find */
-std::mutex m_mtx_find;
-std::condition_variable m_cond_find;
+static std::mutex m_mtx_find;
+static std::condition_variable m_cond_find;
 
 #if NRF_SD_BLE_API >= 5
 static uint32_t    m_config_id = 1;
@@ -188,7 +193,7 @@ static ble_gap_sec_params_t m_sec_params =
 static uint8_t m_private_key[ECC_P256_SK_LEN] = { 0 };
 static uint8_t m_public_key[ECC_P256_PK_LEN] = { 0 };
 
-// encryption data for authentication
+// keyset data for LE security authentication
 static ble_gap_enc_key_t m_own_enc = { 0 };
 static ble_gap_id_key_t m_own_id = { 0 };
 static ble_gap_sign_info_t m_own_sign = { 0 };
@@ -652,7 +657,7 @@ uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps, const char* passk
 	m_sec_params.keypress = keypress ? 1 : 0;
 	m_sec_params.io_caps = io_caps;
 	m_sec_params.lesc = 1; /* enable LE secure conn */
-	m_sec_params.oob = 1; /* set if has out of band auth data */
+	m_sec_params.oob = 0; /* set if has out of band auth data */
 	/* OOB enabled will use OOB method if:
 	- both of devices have out of band(legacy), or
 	- at least one of device has peer OOB data(lesc enabled) */
@@ -941,6 +946,8 @@ uint32_t device_find(uint8_t addr[6], int8_t rssi, const char* passkey, uint16_t
 		}
 	}
 
+	error_code = scan_stop();
+
 	if (elapsed >= timeout || target == m_adv_list.end()) {
 		return NRF_ERROR_TIMEOUT;
 	}
@@ -1004,6 +1011,7 @@ uint32_t device_find(uint8_t addr[6], int8_t rssi, const char* passkey, uint16_t
 }
 
 uint32_t device_find_str(const char* addr_str, int8_t rssi, const char* passkey, uint16_t timeout) {
+	uint8_t* addr = NULL;
 	uint8_t addr_lsb[6] = { 0 };
 	char hex_str[2] = { 0 };
 	if (strlen(addr_str) >= 12) {
@@ -1062,8 +1070,8 @@ uint32_t data_read(uint16_t handle, uint8_t *data, uint16_t *len, uint16_t timeo
 		return error_code;
 	}
 
-	std::unique_lock<std::mutex> lck{ m_mtx_read_write };
-	auto stat = m_cond_read_write.wait_for(lck, std::chrono::milliseconds(timeout));
+	//std::unique_lock<std::mutex> lck{ m_mtx_read_write };
+	auto stat = m_cond_read_write.wait_for(m_lck, std::chrono::milliseconds(timeout));
 	if (stat == std::cv_status::timeout) {
 		return NRF_ERROR_TIMEOUT;
 	}
@@ -1119,9 +1127,9 @@ uint32_t data_write_async(uint16_t handle, uint8_t* data, uint16_t len)
 	write_params.offset = 0;
 	uint32_t error_code = 0;
 	error_code = sd_ble_gattc_write(m_adapter, m_connection_handle, &write_params);
-	sprintf_s(m_log_msg, " Write value to handle:0x%04X code:%d", handle, error_code);
+	sprintf_s(m_log_msg, " Write value to handle:0x%04X data:0x%02x %02x code:%d",
+		handle, m_write_data[handle].p_data[0], m_write_data[handle].p_data[1], error_code);
 	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
-
 	return error_code;
 }
 
@@ -1792,7 +1800,7 @@ static void on_conn_params_update_request(const ble_gap_evt_t * const p_ble_gap_
 		params.conn_param_update_request.conn_params;
 	uint32_t err_code = sd_ble_gap_conn_param_update(m_adapter, m_connection_handle,
 		&(conn_params));
-	sprintf_s(m_log_msg, "DEBUG: connection update request code=%d min=%d max=%d late=%d timeout=%d",
+	sprintf_s(m_log_msg, "connection update request code=%d min=%d max=%d late=%d timeout=%d",
 		err_code,
 		(int)(conn_params.min_conn_interval * 1.25),
 		(int)(conn_params.max_conn_interval * 1.25),
@@ -1841,6 +1849,9 @@ static void on_sec_params_request(const ble_gap_evt_t * const p_ble_gap_evt)
 	log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 
 	memcpy_s(m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, m_public_key, ECC_P256_PK_LEN);
+	sprintf_s(m_log_msg, " own_pk= ");
+	convert_byte_string((char*)m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, &m_log_msg[strlen(m_log_msg)]);
+	log_level(LOG_DEBUG, m_log_msg);
 
 	ble_gap_sec_keyset_t sec_keyset = { 0 };
 	sec_keyset.keys_own.p_enc_key = &m_own_enc;
@@ -1857,6 +1868,47 @@ static void on_sec_params_request(const ble_gap_evt_t * const p_ble_gap_evt)
 	sprintf_s(m_log_msg, " on security params request, return=%d should be %d", err_code, NRF_SUCCESS);
 	log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 }
+
+
+#if NRF_SD_BLE_API >= 3
+/**@brief Function called on BLE_GATTS_EVT_EXCHANGE_MTU_REQUEST event.
+ *
+ * @details Replies to an ATT_MTU exchange request by sending an Exchange MTU Response to the client.
+ *
+ * @param[in] p_ble_gatts_evt Exchange MTU Request Event.
+ */
+static void on_exchange_mtu_request(const ble_gatts_evt_t* const p_ble_gatts_evt)
+{
+	uint32_t err_code = sd_ble_gatts_exchange_mtu_reply(
+		m_adapter,
+		m_connection_handle,
+#if NRF_SD_BLE_API < 5
+		GATT_MTU_SIZE_DEFAULT);
+#else
+		BLE_GATT_ATT_MTU_DEFAULT);
+#endif
+
+	if (err_code != NRF_SUCCESS)
+	{
+		printf("MTU exchange request reply failed, err_code %d\n", err_code);
+		fflush(stdout);
+	}
+}
+
+/**@brief Function called on BLE_GATTC_EVT_EXCHANGE_MTU_RSP event.
+ *
+ * @details Logs the new BLE server RX MTU size.
+ *
+ * @param[in] p_ble_gattc_evt Exchange MTU Response Event.
+ */
+static void on_exchange_mtu_response(const ble_gattc_evt_t* const p_ble_gattc_evt)
+{
+	uint16_t server_rx_mtu = p_ble_gattc_evt->params.exchange_mtu_rsp.server_rx_mtu;
+
+	printf("MTU response received. New ATT_MTU is %d\n", server_rx_mtu);
+	fflush(stdout);
+}
+#endif
 
 
 #pragma endregion
@@ -1899,6 +1951,11 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		on_conn_params_update(&(p_ble_evt->evt.gap_evt));
 		// NOTICE: before associate specific services, 
 		//         should apply param updated request for authentication(whether passkey and bond)
+	}break;
+
+	case BLE_GAP_EVT_SEC_REQUEST:
+	{
+		sprintf_s(m_log_msg, "on sec request");
 	}break;
 
 	case BLE_GAP_EVT_SEC_PARAMS_REQUEST:
@@ -1951,16 +2008,45 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 			p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.oobd_req,
 			p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.p_pk_peer->pk[0]);
 		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+
+		// print peer pubkey
+		sprintf_s(m_log_msg, " peer_pk= ");
+		convert_byte_string((char*)p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.p_pk_peer->pk,
+			BLE_GAP_LESC_P256_PK_LEN, &m_log_msg[strlen(m_log_msg)]);
+		log_level(LOG_DEBUG, m_log_msg);
+		// valid peer pubkey
+		int ecc_res = ecc_p256_valid_public_key(p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.p_pk_peer->pk);
+		sprintf_s(m_log_msg, " peer_pk valid=%d should be 1", ecc_res);
+		log_level(LOG_DEBUG, m_log_msg);
+
 		// compute share secret from peer pk
 		ble_gap_lesc_dhkey_t dhkey = { 0 };
 		ecc_p256_compute_sharedsecret(m_private_key, p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.p_pk_peer->pk, dhkey.key);
-		sprintf_s(m_log_msg, " compute ss0=%d", dhkey.key[0]);
-		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+		sprintf_s(m_log_msg, " compute ss= ");
+		convert_byte_string((char*)dhkey.key, BLE_GAP_LESC_DHKEY_LEN, &m_log_msg[strlen(m_log_msg)]);
+		log_level(LOG_DEBUG, m_log_msg);
+
 		// sd_ble_gap_lesc_dhkey_reply: reply shared
 		err_code = sd_ble_gap_lesc_dhkey_reply(m_adapter, m_connection_handle, &dhkey);
-		// compute pk(m_public_key is ready by dongle_init)
-		// sd_ble_gap_lesc_oob_data_get: get own oob TODO:
-		// sd_ble_gap_lesc_oob_data_set: set own oob, peer oob(how to?)
+		sprintf_s(m_log_msg, " reply dhkey: %d", err_code);
+		log_level(LOG_DEBUG, m_log_msg);
+		
+		// sd_ble_gap_lesc_oob_data_get: get own oob
+		ble_gap_lesc_p256_pk_t pk_own = { 0 };
+		memcpy_s(pk_own.pk, ECC_P256_PK_LEN, m_public_key, ECC_P256_PK_LEN);
+		ble_gap_lesc_oob_data_t oob_own = { 0 };
+		err_code = sd_ble_gap_lesc_oob_data_get(m_adapter, m_connection_handle, &pk_own, &oob_own);
+		sprintf_s(m_log_msg, " oob_get: %d", err_code);
+		log_level(LOG_DEBUG, m_log_msg);
+
+		if (p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.oobd_req == 0)
+			break;
+
+		// sd_ble_gap_lesc_oob_data_set: set own oob, peer oob
+		ble_gap_lesc_oob_data_t oob_peer = { 0 }; // TODO: input required
+		err_code = sd_ble_gap_lesc_oob_data_set(m_adapter, m_connection_handle, &oob_own, &oob_peer);
+		sprintf_s(m_log_msg, " oob_set: %d", err_code);
+		log_level(LOG_DEBUG, m_log_msg);
 	}break;
 
 	case BLE_GAP_EVT_AUTH_KEY_REQUEST:
@@ -1975,8 +2061,6 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		}
 		else if (key_type == BLE_GAP_AUTH_KEY_TYPE_OOB) {
 			//TODO: not implemented
-			// sd_ble_gap_lesc_oob_data_get
-			// sd_ble_gap_lesc_oob_data_set
 			sprintf_s(m_log_msg, " on auth key req by OOB not implemented");
 			log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 			break;
@@ -2064,17 +2148,23 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 
 #if NRF_SD_BLE_API >= 3
 	case BLE_GATTS_EVT_EXCHANGE_MTU_REQUEST:
-		//on_exchange_mtu_request(&(p_ble_evt->evt.gatts_evt));
+		sprintf_s(m_log_msg, "evt exchange mtu request.");
+		log_level(LOG_DEBUG, m_log_msg);
+		on_exchange_mtu_request(&(p_ble_evt->evt.gatts_evt));
 		break;
 
 	case BLE_GATTC_EVT_EXCHANGE_MTU_RSP:
-		//on_exchange_mtu_response(&(p_ble_evt->evt.gattc_evt));
+		sprintf_s(m_log_msg, "evt exchange mtu response.");
+		log_level(LOG_DEBUG, m_log_msg);
+		on_exchange_mtu_response(&(p_ble_evt->evt.gattc_evt));
 		break;
 #endif
 
 #if NRF_SD_BLE_API >= 5
 
 	case BLE_GATTC_EVT_WRITE_CMD_TX_COMPLETE:
+		sprintf_s(m_log_msg, "write cmd tx complete.");
+		log_level(LOG_DEBUG, m_log_msg);
 		break;
 
 	case BLE_GAP_EVT_DATA_LENGTH_UPDATE:
@@ -2084,6 +2174,8 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		break;
 
 	case BLE_GAP_EVT_DATA_LENGTH_UPDATE_REQUEST:
+		sprintf_s(m_log_msg, "evt data len update request.");
+		log_level(LOG_DEBUG, m_log_msg);
 		sd_ble_gap_data_length_update(m_adapter, m_connection_handle, NULL, NULL);
 		break;
 
@@ -2202,9 +2294,10 @@ static uint32_t ble_cfg_set(uint8_t conn_cfg_tag)
 #if NRF_SD_BLE_API >= 6
 	ble_cfg.gap_cfg.role_count_cfg.adv_set_count = BLE_GAP_ADV_SET_COUNT_DEFAULT;
 #endif
-	ble_cfg.gap_cfg.role_count_cfg.periph_role_count = 0;
-	ble_cfg.gap_cfg.role_count_cfg.central_role_count = 1;
-	ble_cfg.gap_cfg.role_count_cfg.central_sec_count = 1; /*NOTICE: set for sd_ble_gap_authenticate*/
+	ble_cfg.gap_cfg.role_count_cfg.periph_role_count = BLE_GAP_ROLE_COUNT_PERIPH_DEFAULT;
+	ble_cfg.gap_cfg.role_count_cfg.central_role_count = BLE_GAP_ROLE_COUNT_CENTRAL_DEFAULT;
+	/*NOTICE: set for sd_ble_gap_authenticate*/
+	ble_cfg.gap_cfg.role_count_cfg.central_sec_count = BLE_GAP_ROLE_COUNT_CENTRAL_SEC_DEFAULT;
 
 	error_code = sd_ble_cfg_set(m_adapter, BLE_GAP_CFG_ROLE_COUNT, &ble_cfg, ram_start);
 	if (error_code != NRF_SUCCESS)
@@ -2232,7 +2325,7 @@ static uint32_t ble_cfg_set(uint8_t conn_cfg_tag)
 #define NRF_SDH_BLE_GATT_MAX_MTU_SIZE 247
 	memset(&ble_cfg, 0, sizeof(ble_cfg));
 	ble_cfg.conn_cfg.conn_cfg_tag = conn_cfg_tag;
-	ble_cfg.conn_cfg.params.gap_conn_cfg.conn_count = 1;
+	ble_cfg.conn_cfg.params.gap_conn_cfg.conn_count = BLE_GAP_CONN_COUNT_DEFAULT;
 	ble_cfg.conn_cfg.params.gap_conn_cfg.event_length = NRF_SDH_BLE_GAP_EVENT_LENGTH;
 	error_code = sd_ble_cfg_set(m_adapter, BLE_CONN_CFG_GAP, &ble_cfg, ram_start);
 	if (error_code != NRF_SUCCESS)
@@ -2278,16 +2371,19 @@ uint32_t callback_add(fn_callback_id_t fn_id, void* fn) {
 uint32_t dongle_init(char* serial_port, uint32_t baud_rate) {
 	// init ecc and generate keypair for later usage?
 	ecc_init();
-	ecc_p256_gen_keypair(m_private_key, m_public_key);
+	int ecc_res = ecc_p256_gen_keypair(m_private_key, m_public_key);
 	uint8_t test_pubkey[ECC_P256_PK_LEN] = { 0 };
-	ecc_p256_compute_pubkey(m_private_key, test_pubkey);
-	// ASSERT: test_pubkey should be the same with m_public_key
+	ecc_res = ecc_p256_compute_pubkey(m_private_key, test_pubkey);
+	// validate pubkey
+	ecc_res = ecc_p256_valid_public_key(test_pubkey);
+	sprintf_s(m_log_msg, "uECC check key pair: %d should be 1", ecc_res);
+	log_level(LOG_DEBUG, m_log_msg);
 
 	uint32_t error_code;
 	uint8_t  cccd_value = 0;
 	
 	sprintf_s(m_log_msg, "Serial port used: %s Baud rate used: %d", serial_port, baud_rate);
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+	log_level(LOG_DEBUG, m_log_msg);
 
 	m_adapter = adapter_init(serial_port, baud_rate);
 #ifdef _DEBUG

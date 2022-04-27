@@ -19,7 +19,7 @@ int rng(uint8_t *dest, unsigned size)
 
 static uint8_t m_be_keys[ECC_P256_SK_LEN * 3];
 
-void reverse(uint8_t* p_dst, uint8_t* p_src, uint32_t len)
+static void reverse(uint8_t* p_dst, uint8_t* p_src, uint32_t len)
 {
 	uint32_t i, j;
 
@@ -100,6 +100,26 @@ int ecc_p256_compute_pubkey(uint8_t* sk, uint8_t* pk) {
 	return 1;
 }
 
+int ecc_p256_valid_public_key(uint8_t* pk) {
+	if (pk == NULL)
+		return 0;
+	const struct uECC_Curve_t* p_curve;
+	uint8_t p_le_pk[ECC_P256_PK_LEN];
+
+	p_curve = uECC_secp256r1();
+
+	reverse(&p_le_pk[0], (uint8_t*)&pk[0], ECC_P256_SK_LEN);
+	reverse(&p_le_pk[ECC_P256_SK_LEN], (uint8_t*)&pk[ECC_P256_SK_LEN], ECC_P256_SK_LEN);
+
+	int ret = uECC_valid_public_key((uint8_t*)&p_le_pk[0], p_curve);
+	if (ret == 0) {
+		printf("NRF_ERROR_INTERNAL: uecc_valid_pk=%d\n", ret);
+		return 0;
+	}
+
+	return 1;
+}
+
 int ecc_p256_compute_sharedsecret(uint8_t* sk, uint8_t* pk, uint8_t* ss) {
 	if (sk == NULL || pk == NULL)
 		return 0;
@@ -113,7 +133,7 @@ int ecc_p256_compute_sharedsecret(uint8_t* sk, uint8_t* pk, uint8_t* ss) {
 	auto argumentcount = 0;
 
 	memcpy_s(p_le_sk, ECC_P256_SK_LEN, sk, ECC_P256_SK_LEN);
-	memcpy_s(p_le_pk, ECC_P256_SK_LEN, pk, ECC_P256_SK_LEN);
+	memcpy_s(p_le_pk, ECC_P256_PK_LEN, pk, ECC_P256_PK_LEN);
 	argumentcount++;
 
 	p_curve = uECC_secp256r1();
@@ -129,13 +149,13 @@ int ecc_p256_compute_sharedsecret(uint8_t* sk, uint8_t* pk, uint8_t* ss) {
 	int ret = uECC_shared_secret((uint8_t*)&m_be_keys[ECC_P256_SK_LEN], (uint8_t*)&m_be_keys[0], p_le_ss, p_curve);
 	if (ret == 0) {
 		printf("NRF_ERROR_INTERNAL: uecc_shared_secret=%d\n", ret);
-		return;
+		return 0;
 	}
 
 	/* convert to little endian bytes and store in m_be_keys */
 	reverse(&m_be_keys[0], &p_le_ss[0], ECC_P256_SK_LEN);
 
-	/* copy back the little endian bytes to p_le_pk */
+	/* copy back the little endian bytes to p_le_ss */
 	memcpy(p_le_ss, m_be_keys, ECC_P256_SK_LEN);
 
 	if (ss != NULL)
