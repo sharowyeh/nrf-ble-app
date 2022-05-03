@@ -228,7 +228,12 @@ uint32_t on_dev_disconnected(uint8_t reason) {
 	connected = false;
 	cond.notify_all();
 
-	// cleanup and ready to update UI dataset
+	// cleanup device and ready to update UI dataset
+	device_items.clear();
+	device_selected = -1;
+	device_item = "";
+
+	// cleanup report and ready to update UI dataset
 	report_item = NULL;
 	report_selected = -1;
 	report_items.clear();

@@ -120,7 +120,7 @@
             this.textBoxAddress.Name = "textBoxAddress";
             this.textBoxAddress.Size = new System.Drawing.Size(120, 24);
             this.textBoxAddress.TabIndex = 6;
-            this.textBoxAddress.Text = "112233445566";
+            this.textBoxAddress.Text = "0";
             // 
             // label3
             // 
