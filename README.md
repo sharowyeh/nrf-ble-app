@@ -49,7 +49,7 @@ Also can simply install Nordic nRF Connect for Desktop and use bluethooth app to
 refer steps as below:
 - Install nrfconnect-setup-3.8.0.exe
 - Download Bluetooth Low Energy app(offical, v3.0.0)
-- (offline alternative) Extract pc-nrfconnect-ble_3.0.0_offical.zip to *<user_dir>*/.nrfconnect-apps/node_modules/ , rename unzipped folder to **pc-nrfconnect-ble** 
+- (offline alternative) Extract .nrfconnect-apps_3.8.0.zip to *<user_dir>*/.nrfconnect-apps/ 
 - Launch nRF Connect for Desktop, will show Bluetooth Low Energy(offical, v3.0.0) on apps list
 - Plug nRF5DK board(PCA10059) in USB port
 - Open Bluetooth Low Energy app than select device, it will ask the device must be programmed
@@ -72,6 +72,10 @@ The C++ UI example app integrated GLFW via imgui
 Bluetooth pairing - blog [LESC(p4)](https://www.bluetooth.com/blog/bluetooth-pairing-part-4/), [legacy(p1)](https://www.bluetooth.com/blog/bluetooth-pairing-passkey-entry/), [keygen(p2)](https://www.bluetooth.com/blog/bluetooth-pairing-part-2-key-generation-methods/), [passkey(p3)](https://www.bluetooth.com/blog/bluetooth-pairing-passkey-entry/)
 
 [Deep dive into LESC](https://medium.com/rtone-iot-security/deep-dive-into-bluetooth-le-security-d2301d640bfc)
+
+[auth responding: BLE_GAP_SEC_STATUS_AUTH_REQ](https://devzone.nordicsemi.com/f/nordic-q-a/16618/sd_ble_gap_encrypt-does-not-seem-to-encrypt-link-after-bonding-done)
+
+[S132-v5 Message Sequence Charts](https://infocenter.nordicsemi.com/index.jsp?topic=%2Fcom.nordic.infocenter.s132.api.v5.0.0%2Fs132_msc_overview.html&cp=4_7_3_7_1)
 
 
 ### Other ways to win32 ###
