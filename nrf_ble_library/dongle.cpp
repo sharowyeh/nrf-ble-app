@@ -44,7 +44,7 @@ enum _uint_ms
 #define SCAN_TIMEOUT  0x0    /**< Scan timeout between 0x01 and 0xFFFF in seconds, 0x0 disables timeout. */
 
 #define MIN_CONNECTION_INTERVAL         MSEC_TO_UNITS(7.5, UNIT_1_25_MS) /**< Determines minimum connection interval in milliseconds. */
-#define MAX_CONNECTION_INTERVAL         MSEC_TO_UNITS(7.5, UNIT_1_25_MS) /**< Determines maximum connection interval in milliseconds. */
+#define MAX_CONNECTION_INTERVAL         MSEC_TO_UNITS(18.75, UNIT_1_25_MS) /**< Determines maximum connection interval in milliseconds. */
 #define SLAVE_LATENCY                   0                                /**< Slave Latency in number of connection events. */
 #define CONNECTION_SUPERVISION_TIMEOUT  MSEC_TO_UNITS(4000, UNIT_10_MS)  /**< Determines supervision time-out in units of 10 milliseconds. */
 
@@ -66,6 +66,7 @@ enum _uint_ms
 
 
 /** Global variables */
+static bool        m_dongle_initialized = false;
 static ble_gap_addr_t  m_connected_addr = { 0 }; /* intent or connected peripheral address */
 static bool        m_is_connected = false; /* peripheral address has been connected(BLE_GAP_EVT_DISCONNECTED) */
 static char        m_passkey[6] = { '1', '2', '3', '4', '5', '6' }; /* default fixed passkey for auth request(BLE_GAP_EVT_AUTH_KEY_REQUEST) */
@@ -614,6 +615,11 @@ uint32_t conn_start(uint8_t addr_type, uint8_t addr[6])
 		(int)(m_connection_param.conn_sup_timeout * 10));
 	log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 
+	//TODO: debug thu diff cfg
+	/*sd_ble_gap_connect(m_adapter, &(m_connected_addr), &m_scan_param, &m_connection_param, BLE_CONN_CFG_TAG_DEFAULT);
+	ble_gap_adv_params_t adv_param = { 0 };
+	sd_ble_gap_adv_start(m_adapter, NULL, m_config_id);*/
+
 	uint32_t err_code;
 	err_code = sd_ble_gap_connect(m_adapter,
 		&(m_connected_addr),
@@ -661,6 +667,16 @@ uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps, const char* passk
 	/* OOB enabled will use OOB method if:
 	- both of devices have out of band(legacy), or
 	- at least one of device has peer OOB data(lesc enabled) */
+	//https://infocenter.nordicsemi.com/topic/com.nordic.infocenter.s132.api.v5.0.0/s132_msc_overview.html?cp=4_7_3_7_1
+	// GAP MSC -> Central Security Procedures
+	//TODO: debug gen ltk
+	/*ble_gap_master_id_t master_id = { 0 };
+	ble_gap_enc_info_t info = { 0 };
+	sd_ble_gap_encrypt(m_adapter, m_connection_handle, NULL, NULL);*/
+	//TODO: debug2 req peer enc
+	m_sec_params.kdist_own.id = 1;
+	//m_sec_params.kdist_peer.enc = 1;
+	//m_sec_params.kdist_peer.id = 1;
 
 	// NOTICE: refer to driver, testcase_security.cpp, we'll use the default security params
 	error_code = sd_ble_gap_authenticate(m_adapter, m_connection_handle, &m_sec_params);
@@ -1143,8 +1159,8 @@ uint32_t data_write(uint16_t handle, uint8_t *data, uint16_t len, uint16_t timeo
 		return error_code;
 	}
 
-	std::unique_lock<std::mutex> lck{ m_mtx_read_write };
-	auto stat = m_cond_read_write.wait_for(lck, std::chrono::milliseconds(timeout));
+	//std::unique_lock<std::mutex> lck{ m_mtx_read_write };
+	auto stat = m_cond_read_write.wait_for(m_lck, std::chrono::milliseconds(timeout));
 	if (stat == std::cv_status::timeout) {
 		return NRF_ERROR_TIMEOUT;
 	}
@@ -1191,27 +1207,28 @@ uint32_t dongle_reset()
 		return NRF_ERROR_INVALID_STATE;
 
 	auto error_code = sd_rpc_conn_reset(m_adapter, SOFT_RESET);
+	sprintf_s(m_log_msg, "RPC reset, code: 0x%02X", error_code);
+
 	if (error_code != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "Failed to reset, code: 0x%02X", error_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
-		//return error_code;
+		log_level(LOG_ERROR, m_log_msg);
 	}
-
-	sprintf_s(m_log_msg, "RPC reset successful.");
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+	else {
+		log_level(LOG_INFO, m_log_msg);
+	}
 
 	error_code = sd_rpc_close(m_adapter);
+	sprintf_s(m_log_msg, "Close nRF BLE Driver. code: 0x%02X", error_code);
 
 	if (error_code != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "Failed to close nRF BLE Driver. Error code: 0x%02X", error_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
-		return error_code;
+		log_level(LOG_ERROR, m_log_msg);
+	}
+	else {
+		log_level(LOG_INFO, m_log_msg);
 	}
 
-	sprintf_s(m_log_msg, "RPC close successful.");
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+	m_dongle_initialized = false;
 	return error_code;
 }
 
@@ -1250,12 +1267,34 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 
 		char name[256] = { 0 };
 		get_adv_name(&p_ble_gap_evt->params.adv_report, name);
+#if NRF_SD_BLE_API >= 6
+		uint8_t  str2[STRING_BUFFER_SIZE] = { 0 };
+		ble_address_to_string_convert(p_ble_gap_evt->params.adv_report.direct_addr, str2);
+		sprintf_s(m_log_msg, "Received adv report peer:0x%s direct:0x%s name:%s\r\n \
+			rssi:%d type:%d chidx:%d dataid:%d priphy:%d setid:%d txpwr:%d auxoff:%d auxphy:%d",
+			str, str2, name,
+			p_ble_gap_evt->params.adv_report.rssi,
+			p_ble_gap_evt->params.adv_report.type,
+			p_ble_gap_evt->params.adv_report.ch_index,
+			p_ble_gap_evt->params.adv_report.data_id,
+			p_ble_gap_evt->params.adv_report.primary_phy,
+			p_ble_gap_evt->params.adv_report.set_id,
+			p_ble_gap_evt->params.adv_report.tx_power,
+			p_ble_gap_evt->params.adv_report.aux_pointer.aux_offset,
+			p_ble_gap_evt->params.adv_report.aux_pointer.aux_phy);
+		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+
+#elif NRF_SD_BLE_API >= 5
 		sprintf_s(m_log_msg, "Received adv report address: 0x%s rssi:%d type:%d rsp:%d name:%s",
 			str, p_ble_gap_evt->params.adv_report.rssi,
 			p_ble_gap_evt->params.adv_report.type,
 			p_ble_gap_evt->params.adv_report.scan_rsp, name);
 		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 
+		if (p_ble_gap_evt->params.adv_report.scan_rsp == 0) {
+			return;
+		}
+#endif
 		if (m_connection_is_in_progress) {
 			sprintf_s(m_log_msg, "Connection has been started, ignore rest of discovered devices");
 			log_handler(m_adapter, SD_RPC_LOG_WARNING, m_log_msg);
@@ -1322,7 +1361,8 @@ static void on_timeout(const ble_gap_evt_t * const p_ble_gap_evt)
  */
 static void on_connected(const ble_gap_evt_t * const p_ble_gap_evt)
 {
-	sprintf_s(m_log_msg, "Connection established");
+	sprintf_s(m_log_msg, "Connection established role=%d",
+		p_ble_gap_evt->params.connected.role); /* BLE_GAP_ROLE_PERIPH 0x1, BLE_GAP_ROLE_CENTRAL 0x2 */
 	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
 
 	m_connected_devices++;
@@ -1977,8 +2017,10 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 			p_ble_evt->evt.gap_evt.params.auth_status.bonded);
 		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 
+		// check auth status and bonded by given security parameter
+		// NOTICE: w/o bond may not have enough privilege interacting most services
 		if (p_ble_evt->evt.gap_evt.params.auth_status.auth_status == BLE_GAP_SEC_STATUS_SUCCESS &&
-			p_ble_evt->evt.gap_evt.params.auth_status.bonded == 1) {
+			p_ble_evt->evt.gap_evt.params.auth_status.bonded | ~m_sec_params.bond) {
 			
 			m_is_authenticated = true;
 
@@ -2168,16 +2210,45 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		break;
 
 	case BLE_GAP_EVT_DATA_LENGTH_UPDATE:
-		sprintf_s(m_log_msg, "Maximum radio packet length updated to %d bytes.",
-			p_ble_evt->evt.gap_evt.params.data_length_update.effective_params.max_tx_octets);
+		sprintf_s(m_log_msg, "Maximum packet length updated: rx=%d bytes, %d us, tx=%d bytes, %d us",
+			p_ble_evt->evt.gap_evt.params.data_length_update.effective_params.max_rx_octets,
+			p_ble_evt->evt.gap_evt.params.data_length_update.effective_params.max_rx_time_us,
+			p_ble_evt->evt.gap_evt.params.data_length_update.effective_params.max_tx_octets,
+			p_ble_evt->evt.gap_evt.params.data_length_update.effective_params.max_tx_time_us);
 		log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
 		break;
 
 	case BLE_GAP_EVT_DATA_LENGTH_UPDATE_REQUEST:
-		sprintf_s(m_log_msg, "evt data len update request.");
+	{
+		//https://infocenter.nordicsemi.com/topic/com.nordic.infocenter.s132.api.v5.0.0/s132_msc_overview.html?cp=4_7_3_7_1
+		// GAP MSC -> Data Length Update Procedure
+		auto peer_params = p_ble_evt->evt.gap_evt.params.data_length_update_request.peer_params;
+		sprintf_s(m_log_msg, "evt data len update request rx=%d bytes, %d us, tx=%d bytes, %d us",
+			peer_params.max_rx_octets,
+			peer_params.max_rx_time_us,
+			peer_params.max_tx_octets,
+			peer_params.max_tx_time_us);
 		log_level(LOG_DEBUG, m_log_msg);
-		sd_ble_gap_data_length_update(m_adapter, m_connection_handle, NULL, NULL);
-		break;
+
+#define NRF_SDH_BLE_GAP_DATA_LENGTH 251
+
+		ble_gap_data_length_params_t m_data_length = { 0 };
+		m_data_length.max_rx_octets = NRF_SDH_BLE_GAP_DATA_LENGTH;
+		m_data_length.max_tx_octets = NRF_SDH_BLE_GAP_DATA_LENGTH;
+		m_data_length.max_rx_time_us = BLE_GAP_DATA_LENGTH_AUTO;
+		m_data_length.max_tx_time_us = BLE_GAP_DATA_LENGTH_AUTO;
+		ble_gap_data_length_limitation_t m_data_limit = { 0 };
+		auto err_code = sd_ble_gap_data_length_update(m_adapter, m_connection_handle, &m_data_length, NULL);
+		sprintf_s(m_log_msg, "Request maximum packet length update=%d: rx=%d bytes, %d us, tx=%d bytes, %d us",
+			err_code,
+			m_data_length.max_rx_octets, m_data_length.max_rx_time_us,
+			m_data_length.max_tx_octets, m_data_length.max_tx_time_us);
+		log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+		sprintf_s(m_log_msg, "Request maximum packet length limit: rx=%d bytes, tx=%d bytes, %d us",
+			m_data_limit.rx_payload_limited_octets,
+			m_data_limit.tx_payload_limited_octets, m_data_limit.tx_rx_time_limited_us);
+		log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+	}break;
 
 	case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
 	{
@@ -2307,25 +2378,14 @@ static uint32_t ble_cfg_set(uint8_t conn_cfg_tag)
 		return error_code;
 	}
 
-	memset(&ble_cfg, 0x00, sizeof(ble_cfg));
-	ble_cfg.conn_cfg.conn_cfg_tag = conn_cfg_tag;
-	ble_cfg.conn_cfg.params.gatt_conn_cfg.att_mtu = 150;
-
-	error_code = sd_ble_cfg_set(m_adapter, BLE_CONN_CFG_GATT, &ble_cfg, ram_start);
-	if (error_code != NRF_SUCCESS)
-	{
-		sprintf_s(m_log_msg, "sd_ble_cfg_set() failed when attempting to set BLE_CONN_CFG_GATT. Error code: 0x%02X", error_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
-		return error_code;
-	}
-
 	// GAP config code block from nordic_uart_client example
-#if NRF_SD_BLE_API >= 5
-#define NRF_SDH_BLE_GAP_EVENT_LENGTH 320
+#define NRF_SDH_BLE_GAP_EVENT_LENGTH 8/*320*/
 #define NRF_SDH_BLE_GATT_MAX_MTU_SIZE 247
+
+#if NRF_SD_BLE_API >= 5
 	memset(&ble_cfg, 0, sizeof(ble_cfg));
 	ble_cfg.conn_cfg.conn_cfg_tag = conn_cfg_tag;
-	ble_cfg.conn_cfg.params.gap_conn_cfg.conn_count = BLE_GAP_CONN_COUNT_DEFAULT;
+	ble_cfg.conn_cfg.params.gap_conn_cfg.conn_count = 1;
 	ble_cfg.conn_cfg.params.gap_conn_cfg.event_length = NRF_SDH_BLE_GAP_EVENT_LENGTH;
 	error_code = sd_ble_cfg_set(m_adapter, BLE_CONN_CFG_GAP, &ble_cfg, ram_start);
 	if (error_code != NRF_SUCCESS)
@@ -2335,6 +2395,49 @@ static uint32_t ble_cfg_set(uint8_t conn_cfg_tag)
 		return error_code;
 	}
 #endif
+
+	//memset(&ble_cfg, 0x00, sizeof(ble_cfg));
+	//ble_cfg.conn_cfg.conn_cfg_tag = conn_cfg_tag;
+	ble_cfg.conn_cfg.params.gatt_conn_cfg.att_mtu = NRF_SDH_BLE_GATT_MAX_MTU_SIZE/*150*/;
+
+	error_code = sd_ble_cfg_set(m_adapter, BLE_CONN_CFG_GATT, &ble_cfg, ram_start);
+	if (error_code != NRF_SUCCESS)
+	{
+		sprintf_s(m_log_msg, "sd_ble_cfg_set() failed when attempting to set BLE_CONN_CFG_GATT. Error code: 0x%02X", error_code);
+		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		return error_code;
+	}
+
+	ble_cfg.conn_cfg.params.gattc_conn_cfg.write_cmd_tx_queue_size = 10;
+	error_code = sd_ble_cfg_set(m_adapter, BLE_CONN_CFG_GATTC, &ble_cfg, ram_start);
+	if (error_code != NRF_SUCCESS)
+	{
+		sprintf_s(m_log_msg, "sd_ble_cfg_set() failed when attempting to set BLE_CONN_CFG_GATTC. Error code: 0x%02X", error_code);
+		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		return error_code;
+	}
+
+	ble_cfg.conn_cfg.params.gatts_conn_cfg.hvn_tx_queue_size = 10;
+	error_code = sd_ble_cfg_set(m_adapter, BLE_CONN_CFG_GATTS, &ble_cfg, ram_start);
+	if (error_code != NRF_SUCCESS)
+	{
+		sprintf_s(m_log_msg, "sd_ble_cfg_set() failed when attempting to set BLE_CONN_CFG_GATTS. Error code: 0x%02X", error_code);
+		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		return error_code;
+	}
+
+	ble_cfg.conn_cfg.params.l2cap_conn_cfg.ch_count = BLE_L2CAP_CH_COUNT_MAX;
+	ble_cfg.conn_cfg.params.l2cap_conn_cfg.rx_mps = BLE_L2CAP_MPS_MIN;
+	ble_cfg.conn_cfg.params.l2cap_conn_cfg.tx_mps = BLE_L2CAP_MPS_MIN;
+	ble_cfg.conn_cfg.params.l2cap_conn_cfg.rx_queue_size = 10;
+	ble_cfg.conn_cfg.params.l2cap_conn_cfg.tx_queue_size = 10;
+	error_code = sd_ble_cfg_set(m_adapter, BLE_CONN_CFG_L2CAP, &ble_cfg, ram_start);
+	if (error_code != NRF_SUCCESS)
+	{
+		sprintf_s(m_log_msg, "sd_ble_cfg_set() failed when attempting to set BLE_CONN_CFG_L2CAP. Error code: 0x%02X", error_code);
+		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		return error_code;
+	}
 
 	return NRF_SUCCESS;
 }
@@ -2368,7 +2471,14 @@ uint32_t callback_add(fn_callback_id_t fn_id, void* fn) {
 }
 
 /* init Nordic connectiviy dongle and register event for rpc*/
-uint32_t dongle_init(char* serial_port, uint32_t baud_rate) {
+uint32_t dongle_init(char* serial_port, uint32_t baud_rate)
+{
+	if (m_dongle_initialized) {
+		sprintf_s(m_log_msg, "Dongle must be reset before re-initialize(re-plug dongle is recommanded)");
+		log_level(LOG_ERROR, m_log_msg);
+		return NRF_ERROR_INVALID_STATE;
+	}
+
 	// init ecc and generate keypair for later usage?
 	ecc_init();
 	int ecc_res = ecc_p256_gen_keypair(m_private_key, m_public_key);
@@ -2421,6 +2531,8 @@ uint32_t dongle_init(char* serial_port, uint32_t baud_rate) {
 		return error_code;
 	}
 #endif
+
+	m_dongle_initialized = true;
 
 	ble_version_t ver = { 0 };
 	error_code = sd_ble_version_get(m_adapter, &ver);
