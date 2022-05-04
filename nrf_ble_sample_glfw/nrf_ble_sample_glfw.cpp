@@ -470,14 +470,16 @@ static void draw_report_layout() {
 			msg_window_text = "No endpoint selected";
 			show_msg_window = true;
 		}
-		std::string data = std::string(write_data_str);
-		auto sp = split(data, " ");
-		if (sp.size() > 0) {
-			uint8_t* bytes = (uint8_t*)calloc(sp.size(), sizeof(uint8_t));
-			if (bytes != NULL) {
-				for (size_t i = 0; i < sp.size(); i++)
-					bytes[i] = strtoul(sp[i].c_str(), NULL, 16);
-				auto ble_code = data_write(report_items[report_selected].handle, bytes, sp.size(), 2000);
+		else {
+			std::string data = std::string(write_data_str);
+			auto sp = split(data, " ");
+			if (sp.size() > 0) {
+				uint8_t* bytes = (uint8_t*)calloc(sp.size(), sizeof(uint8_t));
+				if (bytes != NULL) {
+					for (size_t i = 0; i < sp.size(); i++)
+						bytes[i] = strtoul(sp[i].c_str(), NULL, 16);
+					auto ble_code = data_write(report_items[report_selected].handle, bytes, sp.size(), 2000);
+				}
 			}
 		}
 	}
@@ -490,12 +492,14 @@ static void draw_report_layout() {
 			msg_window_text = "No endpoint selected";
 			show_msg_window = true;
 		}
-		uint8_t bytes[256] = { 0 };
-		uint16_t len = 256;
-		auto ble_code = data_read(report_items[report_selected].handle, bytes, &len, 2000);
-		if (ble_code == 0) {
-			for (int i = 0; i < len && i * 3 < 128; i++)
-				sprintf_s(&read_data_str[i * 3], 4, "%02x ", bytes[i]);
+		else {
+			uint8_t bytes[256] = { 0 };
+			uint16_t len = 256;
+			auto ble_code = data_read(report_items[report_selected].handle, bytes, &len, 2000);
+			if (ble_code == 0) {
+				for (int i = 0; i < len && i * 3 < 128; i++)
+					sprintf_s(&read_data_str[i * 3], 4, "%02x ", bytes[i]);
+			}
 		}
 	}
 	ImGui::SameLine();

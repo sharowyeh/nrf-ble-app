@@ -181,12 +181,12 @@ static ble_gap_sec_params_t m_sec_params =
 	(uint8_t)16, /*max_key_size, header default from driver test_util_adapater_wrapper*/
 	{ /*kdist_own, default from pc-nrfconnect-ble/lib/reducer/securityReducer.js*/
 		(uint8_t)1, /** < enc, Long Term Key and Master Identification. */
-		(uint8_t)0, /** < id, Identity Resolving Key and Identity Address Information. */
+		(uint8_t)1, /** < id, Identity Resolving Key and Identity Address Information. */
 		(uint8_t)0, /** < sign, Connection Signature Resolving Key. */
 		(uint8_t)0 /** < link, Derive the Link Key from the LTK. */
 	},
 	{ /*kdist_peer*/
-		1, 0, 0, 0
+		1, 1, 0, 0
 	}
 };
 
@@ -674,9 +674,12 @@ uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps, const char* passk
 	ble_gap_enc_info_t info = { 0 };
 	sd_ble_gap_encrypt(m_adapter, m_connection_handle, NULL, NULL);*/
 	//TODO: debug2 req peer enc
+	m_sec_params.kdist_own.enc = 1;
 	m_sec_params.kdist_own.id = 1;
-	//m_sec_params.kdist_peer.enc = 1;
-	//m_sec_params.kdist_peer.id = 1;
+	m_sec_params.kdist_own.sign = 0; // 1:NRF_ERROR_NOT_SUPPORTED
+	m_sec_params.kdist_own.link = 0; // 1:NRF_ERROR_NOT_SUPPORTED
+	m_sec_params.kdist_peer.enc = 1;
+	m_sec_params.kdist_peer.id = 1;
 
 	// NOTICE: refer to driver, testcase_security.cpp, we'll use the default security params
 	error_code = sd_ble_gap_authenticate(m_adapter, m_connection_handle, &m_sec_params);
