@@ -663,7 +663,8 @@ uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps, const char* passk
 	m_sec_params.keypress = keypress ? 1 : 0;
 	m_sec_params.io_caps = io_caps;
 	m_sec_params.lesc = 1; /* enable LE secure conn */
-	m_sec_params.oob = 0; /* set if has out of band auth data */
+	m_sec_params.mitm = 1;
+	m_sec_params.oob = 1; /* set if has out of band auth data */
 	/* OOB enabled will use OOB method if:
 	- both of devices have out of band(legacy), or
 	- at least one of device has peer OOB data(lesc enabled) */
@@ -1956,6 +1957,14 @@ static void on_exchange_mtu_response(const ble_gattc_evt_t* const p_ble_gattc_ev
 
 #pragma endregion
 
+/* NOTICE: dummy oob data for debug from
+* https://devzone.nordicsemi.com/f/nordic-q-a/47932/oob-works-with-mcp-but-fails-with-nrf-connect 
+*/
+static char m_oob_debug[16] = { 0xAA, 0xBB, 0xCC, 0xDD,
+									  0xEE, 0xFF, 0x99, 0x88,
+									  0x77, 0x66, 0x55, 0x44,
+									  0x33, 0x22, 0x11, 0x00 };
+
 
 /** Event dispatcher */
 
@@ -2105,14 +2114,18 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 			log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
 		}
 		else if (key_type == BLE_GAP_AUTH_KEY_TYPE_OOB) {
-			//TODO: not implemented
-			sprintf_s(m_log_msg, " on auth key req by OOB not implemented");
+			key = (uint8_t*)&m_oob_debug[0];
+			sprintf_s(m_log_msg, " on auth key req by OOB: ");
+			convert_byte_string(m_oob_debug, 16, &m_log_msg[strlen(m_log_msg)]);
 			log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
-			break;
 		}
 		err_code = sd_ble_gap_auth_key_reply(m_adapter, m_connection_handle, key_type, key);
 		sprintf_s(m_log_msg, " on auth key req, keytype:%d return:%d", key_type, err_code);
 		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+
+		// only notify to caller which auth via passkey
+		if (key_type != BLE_GAP_AUTH_KEY_TYPE_PASSKEY)
+			break;
 
 		if (m_callback_fn_list[FN_ON_PASSKEY_REQUIRED].size() > 0) {
 			std::string str = std::string(m_passkey);
