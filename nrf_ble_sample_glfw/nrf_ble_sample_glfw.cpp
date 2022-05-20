@@ -90,7 +90,9 @@ void on_dev_discovered(const char* addr_str, const char* name, uint8_t addr_type
 	for (auto it = device_items.begin(); it != device_items.end(); it++) {
 		if (std::string(addr_str).compare(it->addr_str) == 0) {
 			it->rssi = rssi;
-			sprintf_s((char*)it->label, 128, "%s %s %d", addr_str, name, rssi);
+			if (std::string(name).empty() == false)
+				it->name = std::string(name);
+			sprintf_s((char*)it->label, 128, "%s %s %d", addr_str, it->name.c_str(), rssi);
 			exists = true;
 			break;
 		}
@@ -127,6 +129,7 @@ void on_dev_connected(uint8_t addr_type, uint8_t* addr)
 	connected = true;
 	printf("[main] auth start\n");
 	// NOTICE: service discovery should wait before param updated event or bond for auth secure param(or passkey)
+		//         io_caps: use library default BLE_GAP_IO_CAPS_KEYBOARD_ONLY
 	auth_start(true, false, 0x2, "654321");
 	// than
 	//service_discovery_start();

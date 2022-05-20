@@ -83,8 +83,14 @@ static adapter_t * m_adapter = NULL;
 /* Callback functions from caller */
 static std::map<fn_callback_id_t, std::vector<void*>> m_callback_fn_list;
 
-/* Advertising addresses */
-static std::map<uint64_t, ble_gap_evt_adv_report_t> m_adv_list; /*addr, report*/
+/* Advertising data */
+typedef struct _adv_data_t {
+	ble_gap_evt_adv_report_t adv_report;
+	std::map<uint8_t, data_t> type_data_list; /*BLE_GAP_AD_TYPE_DEFINITIONS, data*/
+} adv_data_t;
+
+/* Advertising data key pair by address */
+static std::map<uint64_t, adv_data_t> m_adv_list; /*addr, report*/
 
 /* Discovered characteristic data structure */
 typedef struct _dev_char_t {
@@ -332,6 +338,67 @@ static void ble_address_to_uint64_convert(uint8_t addr[BLE_GAP_ADDR_LEN], uint64
 	}
 }
 
+static uint32_t convert_byte_string(char* byte_array, uint32_t len, char* str);
+
+/* func duplicated from adv_report_parse splitted advertising data by each types */
+static uint32_t adv_report_data_slice(const ble_gap_evt_adv_report_t* p_adv_report, std::map<uint8_t, data_t>* pp_type_data)
+{
+	data_t   adv_data;
+
+	// Initialize advertisement report for parsing
+#if NRF_SD_BLE_API >= 6
+	adv_data.p_data = (uint8_t*)p_adv_report->data.p_data;
+	adv_data.data_len = p_adv_report->data.len;
+#else
+	adv_data.p_data = (uint8_t*)p_adv_report->data;
+	adv_data.data_len = p_adv_report->dlen;
+#endif
+
+	uint32_t  index = 0;
+	uint8_t* p_data;
+
+	char log_data[256] = { 0 };
+	convert_byte_string((char*)adv_data.p_data, adv_data.data_len, log_data);
+	sprintf_s(m_log_msg, " adv:%s", log_data);
+	log_level(LOG_DEBUG, m_log_msg);
+
+	p_data = adv_data.p_data;
+
+	while (index < adv_data.data_len)
+	{
+		uint8_t field_length = p_data[index];
+		uint8_t field_type = p_data[index + 1];
+
+		data_t type_data = {
+			&p_data[index + 2],
+			field_length - 1
+		};
+		pp_type_data->insert_or_assign(field_type, type_data);
+		/*sprintf_s(m_log_msg, " type:%x datalen:%d", field_type, field_length);
+		log_level(LOG_DEBUG, m_log_msg);*/
+		index += field_length + 1;
+	}
+	return NRF_SUCCESS;
+}
+
+/* will find name in m_adv_list[].type_data_list */
+static bool get_adv_name(std::map<uint8_t, data_t>* pp_type_data, char* name)
+{
+	auto found = pp_type_data->find(BLE_GAP_AD_TYPE_COMPLETE_LOCAL_NAME);
+	if (found != pp_type_data->end()) {
+		memcpy(name, found->second.p_data, found->second.data_len);
+		return true;
+	}
+
+	found = pp_type_data->find(BLE_GAP_AD_TYPE_SHORT_LOCAL_NAME);
+	if (found != pp_type_data->end()) {
+		memcpy(name, found->second.p_data, found->second.data_len);
+		return true;
+	}
+
+	return false;
+}
+
 /**
  * @brief Parses advertisement data, providing length and location of the field in case
  *        matching data is found.
@@ -367,6 +434,7 @@ static uint32_t adv_report_parse(uint8_t type, data_t * p_advdata, data_t * p_ty
 	return NRF_ERROR_NOT_FOUND;
 }
 
+// NOTICE: func has replaced by store adv data in type_data_list
 static bool get_adv_name(const ble_gap_evt_adv_report_t *p_adv_report, char * name)
 {
 	uint32_t err_code;
@@ -402,15 +470,16 @@ static bool get_adv_name(const ble_gap_evt_adv_report_t *p_adv_report, char * na
 		return true;
 	}
 
-	// Look for the manufacturing data if it was not found as complete
-	err_code = adv_report_parse(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA,
-		&adv_data,
-		&dev_name);
-	if (err_code == NRF_SUCCESS)
-	{
-		memcpy(name, dev_name.p_data, dev_name.data_len);
-		return true;
-	}
+	//NOTICE: only get readable ascii, otherwise refer to adv_report_data_slice()
+	//// Look for the manufacturing data if it was not found as complete
+	//err_code = adv_report_parse(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA,
+	//	&adv_data,
+	//	&dev_name);
+	//if (err_code == NRF_SUCCESS)
+	//{
+	//	memcpy(name, dev_name.p_data, dev_name.data_len);
+	//	return true;
+	//}
 
 	return false;
 }
@@ -663,8 +732,8 @@ uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps, const char* passk
 	m_sec_params.keypress = keypress ? 1 : 0;
 	m_sec_params.io_caps = io_caps;
 	m_sec_params.lesc = 1; /* enable LE secure conn */
-	m_sec_params.mitm = 1;
-	m_sec_params.oob = 1; /* set if has out of band auth data */
+	m_sec_params.oob = 0; /* set if has out of band auth data */
+	m_sec_params.mitm = 0;
 	/* OOB enabled will use OOB method if:
 	- both of devices have out of band(legacy), or
 	- at least one of device has peer OOB data(lesc enabled) */
@@ -947,7 +1016,7 @@ uint32_t device_find(uint8_t addr[6], int8_t rssi, const char* passkey, uint16_t
 		elapsed += 100;
 		target = m_adv_list.begin();
 		for (; target != m_adv_list.end(); target++) {
-			if (target->second.rssi < rssi)
+			if (target->second.adv_report.rssi < rssi)
 				continue;
 			if (addr != NULL) {
 				uint64_t addr_num = 0;
@@ -972,7 +1041,7 @@ uint32_t device_find(uint8_t addr[6], int8_t rssi, const char* passkey, uint16_t
 		return NRF_ERROR_TIMEOUT;
 	}
 
-	error_code = conn_start(target->second.peer_addr.addr_type, target->second.peer_addr.addr);
+	error_code = conn_start(target->second.adv_report.peer_addr.addr_type, target->second.adv_report.peer_addr.addr);
 	if (error_code != NRF_SUCCESS) {
 		return error_code;
 	}
@@ -1259,18 +1328,32 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 	uint64_t addr_num = 0;
 	ble_address_to_uint64_convert((uint8_t *)p_ble_gap_evt->params.adv_report.peer_addr.addr, &addr_num);
 
-	// list always up-to-date, report to caller if new arrival or rssi updated
-	//bool new_arrival = (m_adv_list.find(addr_num) == m_adv_list.end());
-	bool new_arrival = m_adv_list[addr_num].rssi != p_ble_gap_evt->params.adv_report.rssi;
-	m_adv_list.insert_or_assign(addr_num, p_ble_gap_evt->params.adv_report);
+	// adv list always up-to-date
+	bool arrival = (m_adv_list.find(addr_num) == m_adv_list.end());
+	if (arrival) {
+		adv_data_t adv_data = {
+			p_ble_gap_evt->params.adv_report
+		};
+		m_adv_list.insert_or_assign(addr_num, adv_data);
+	}
+	//m_adv_list.insert_or_assign(addr_num, p_ble_gap_evt->params.adv_report);
 
-	if (new_arrival)
+	adv_report_data_slice(&p_ble_gap_evt->params.adv_report, &m_adv_list[addr_num].type_data_list);
+	sprintf_s(m_log_msg, "Scan addr:%llx sliced type data size:%lu", addr_num, m_adv_list[addr_num].type_data_list.size());
+	log_level(LOG_DEBUG, m_log_msg);
+
+	// TODO: caller update if any or rssi changed?
+	bool update = m_adv_list[addr_num].adv_report.rssi != p_ble_gap_evt->params.adv_report.rssi;
+	if (update)
 	{
 		// Log the Bluetooth device address of advertisement packet received.
 		ble_address_to_string_convert(p_ble_gap_evt->params.adv_report.peer_addr, str);
 
 		char name[256] = { 0 };
-		get_adv_name(&p_ble_gap_evt->params.adv_report, name);
+		// Just get name from m_adv_list[].type_data_list[]
+		get_adv_name(&m_adv_list[addr_num].type_data_list, name);
+		//get_adv_name(&p_ble_gap_evt->params.adv_report, name);
+
 #if NRF_SD_BLE_API >= 6
 		uint8_t  str2[STRING_BUFFER_SIZE] = { 0 };
 		ble_address_to_string_convert(p_ble_gap_evt->params.adv_report.direct_addr, str2);
@@ -1295,7 +1378,8 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 			p_ble_gap_evt->params.adv_report.scan_rsp, name);
 		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 
-		if (p_ble_gap_evt->params.adv_report.scan_rsp == 0) {
+		if (p_ble_gap_evt->params.adv_report.scan_rsp == 0 /*||
+			p_ble_gap_evt->params.adv_report.type != BLE_GAP_ADV_TYPE_ADV_IND*/) {
 			return;
 		}
 #endif
@@ -1493,12 +1577,15 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
 	{
 		memset(uuid_string, 0, sizeof(uuid_string));
 		get_uuid_string(p_ble_gattc_evt->params.char_disc_rsp.chars[i].uuid.uuid, uuid_string);
-		sprintf_s(m_log_msg, " Characteristic handle:0x%04X, UUID: 0x%04X(%s) decl:0x%04X prop(LSB):0x%x",
+		sprintf_s(m_log_msg, " Characteristic handle:0x%04X, UUID: 0x%04X(%s) decl:0x%04X prop(LSB):0x%x, r/w/n:%d/%d/%d",
 			p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value,
 			p_ble_gattc_evt->params.char_disc_rsp.chars[i].uuid.uuid,
 			uuid_string,
 			p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_decl,
-			p_ble_gattc_evt->params.char_disc_rsp.chars[i].char_props);
+			p_ble_gattc_evt->params.char_disc_rsp.chars[i].char_props,
+			p_ble_gattc_evt->params.char_disc_rsp.chars[i].char_props.read,
+			p_ble_gattc_evt->params.char_disc_rsp.chars[i].char_props.write,
+			p_ble_gattc_evt->params.char_disc_rsp.chars[i].char_props.notify);
 		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 
 		// store characteristic to list
@@ -1958,7 +2045,7 @@ static void on_exchange_mtu_response(const ble_gattc_evt_t* const p_ble_gattc_ev
 #pragma endregion
 
 /* NOTICE: dummy oob data for debug from
-* https://devzone.nordicsemi.com/f/nordic-q-a/47932/oob-works-with-mcp-but-fails-with-nrf-connect 
+* https://devzone.nordicsemi.com/f/nordic-q-a/47932/oob-works-with-mcp-but-fails-with-nrf-connect
 */
 static char m_oob_debug[16] = { 0xAA, 0xBB, 0xCC, 0xDD,
 									  0xEE, 0xFF, 0x99, 0x88,
@@ -2091,6 +2178,15 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		ble_gap_lesc_oob_data_t oob_own = { 0 };
 		err_code = sd_ble_gap_lesc_oob_data_get(m_adapter, m_connection_handle, &pk_own, &oob_own);
 		sprintf_s(m_log_msg, " oob_get: %d", err_code);
+		log_level(LOG_DEBUG, m_log_msg);
+		sprintf_s(m_log_msg, "  pk_own= ");
+		convert_byte_string((char*)pk_own.pk, BLE_GAP_LESC_P256_PK_LEN, &m_log_msg[strlen(m_log_msg)]);
+		log_level(LOG_DEBUG, m_log_msg);
+		sprintf_s(m_log_msg, "  oob_own.random= ");
+		convert_byte_string((char*)oob_own.r, BLE_GAP_SEC_KEY_LEN, &m_log_msg[strlen(m_log_msg)]);
+		log_level(LOG_DEBUG, m_log_msg);
+		sprintf_s(m_log_msg, "  oob_own.confirm= ");
+		convert_byte_string((char*)oob_own.c, BLE_GAP_SEC_KEY_LEN, &m_log_msg[strlen(m_log_msg)]);
 		log_level(LOG_DEBUG, m_log_msg);
 
 		if (p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.oobd_req == 0)
