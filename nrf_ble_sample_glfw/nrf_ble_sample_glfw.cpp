@@ -129,6 +129,7 @@ void on_dev_connected(uint8_t addr_type, uint8_t* addr)
 	connected = true;
 	printf("[main] auth start\n");
 	// NOTICE: service discovery should wait before param updated event or bond for auth secure param(or passkey)
+		//         io_caps: use library default BLE_GAP_IO_CAPS_KEYBOARD_ONLY
 	auth_start(true, false, 0x2, "654321");
 	// than
 	//service_discovery_start();
