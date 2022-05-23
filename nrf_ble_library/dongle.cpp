@@ -385,6 +385,9 @@ static uint32_t adv_report_data_slice(const ble_gap_evt_adv_report_t* p_adv_repo
 		uint8_t field_length = p_data[index];
 		uint8_t field_type = p_data[index + 1];
 
+		//data_t* field_data;
+		auto field_data = pp_type_data[field_type];
+
 		data_t type_data = {
 			&p_data[index + 2],
 			field_length - 1
@@ -2021,8 +2024,8 @@ static void on_exchange_mtu_response(const ble_gattc_evt_t* const p_ble_gattc_ev
 
 #pragma endregion
 
-/* NOTICE: dummy oob data for debug from
-* https://devzone.nordicsemi.com/f/nordic-q-a/47932/oob-works-with-mcp-but-fails-with-nrf-connect
+/* NOTICE: dummy legacy oob data for debug
+* reference: https://devzone.nordicsemi.com/f/nordic-q-a/47932/oob-works-with-mcp-but-fails-with-nrf-connect
 */
 static char m_oob_debug[16] = { 0xAA, 0xBB, 0xCC, 0xDD,
 									  0xEE, 0xFF, 0x99, 0x88,
