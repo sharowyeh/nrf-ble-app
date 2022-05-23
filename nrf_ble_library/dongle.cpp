@@ -2044,8 +2044,8 @@ static void on_exchange_mtu_response(const ble_gattc_evt_t* const p_ble_gattc_ev
 
 #pragma endregion
 
-/* NOTICE: dummy oob data for debug from
-* https://devzone.nordicsemi.com/f/nordic-q-a/47932/oob-works-with-mcp-but-fails-with-nrf-connect
+/* NOTICE: dummy legacy oob data for debug
+* reference: https://devzone.nordicsemi.com/f/nordic-q-a/47932/oob-works-with-mcp-but-fails-with-nrf-connect
 */
 static char m_oob_debug[16] = { 0xAA, 0xBB, 0xCC, 0xDD,
 									  0xEE, 0xFF, 0x99, 0x88,
