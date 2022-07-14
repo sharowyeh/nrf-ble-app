@@ -359,7 +359,7 @@ static uint32_t adv_report_data_slice(const ble_gap_evt_adv_report_t* p_adv_repo
 
 	char log_data[256] = { 0 };
 	convert_byte_string((char*)adv_data.p_data, adv_data.data_len, log_data);
-	sprintf_s(m_log_msg, " adv:%s", log_data);
+	sprintf_s(m_log_msg, "Received adv report data: %s", log_data);
 	log_level(LOG_DEBUG, m_log_msg);
 
 	p_data = adv_data.p_data;
@@ -368,6 +368,9 @@ static uint32_t adv_report_data_slice(const ble_gap_evt_adv_report_t* p_adv_repo
 	{
 		uint8_t field_length = p_data[index];
 		uint8_t field_type = p_data[index + 1];
+
+		//data_t* field_data;
+		auto field_data = pp_type_data[field_type];
 
 		data_t type_data = {
 			&p_data[index + 2],
@@ -1339,7 +1342,12 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 	//m_adv_list.insert_or_assign(addr_num, p_ble_gap_evt->params.adv_report);
 
 	adv_report_data_slice(&p_ble_gap_evt->params.adv_report, &m_adv_list[addr_num].type_data_list);
-	sprintf_s(m_log_msg, "Scan addr:%llx sliced type data size:%lu", addr_num, m_adv_list[addr_num].type_data_list.size());
+	sprintf_s(m_log_msg, "Parsed adv report address: 0x%llX sliced type count:%lu", addr_num, m_adv_list[addr_num].type_data_list.size());
+	for (auto it = m_adv_list[addr_num].type_data_list.begin(); it != m_adv_list[addr_num].type_data_list.end(); it++) {
+		char log_data[256] = { 0 };
+		convert_byte_string((char*)it->second.p_data, it->second.data_len, log_data);
+		sprintf_s(m_log_msg, "%s\n report type:0x%02x data: %s", m_log_msg, it->first, log_data);
+	}
 	log_level(LOG_DEBUG, m_log_msg);
 
 	// TODO: caller update if any or rssi changed?
@@ -1372,10 +1380,10 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 
 #elif NRF_SD_BLE_API >= 5
-		sprintf_s(m_log_msg, "Received adv report address: 0x%s rssi:%d type:%d rsp:%d name:%s",
+		sprintf_s(m_log_msg, "Received adv report address: 0x%s rssi:%d type:%d rsp:%d",
 			str, p_ble_gap_evt->params.adv_report.rssi,
 			p_ble_gap_evt->params.adv_report.type,
-			p_ble_gap_evt->params.adv_report.scan_rsp, name);
+			p_ble_gap_evt->params.adv_report.scan_rsp);
 		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 
 		if (p_ble_gap_evt->params.adv_report.scan_rsp == 0 /*||
