@@ -61,6 +61,8 @@ EXTERNC NRFBLEAPI uint32_t dongle_init(char* serial_port, uint32_t baud_rate);
 EXTERNC NRFBLEAPI uint32_t scan_start(float interval, float window, bool active, uint16_t timeout);
 EXTERNC NRFBLEAPI uint32_t scan_stop();
 EXTERNC NRFBLEAPI uint32_t conn_start(uint8_t addr_type, uint8_t addr[6]);
+/*TODO:isolate ble secure func for further dev, params not fixed yet*/
+EXTERNC NRFBLEAPI uint32_t auth_config(bool lesc, bool oob, bool mitm);
 /*io_caps:0x2(BLE_GAP_IO_CAPS_KEYBOARD_ONLY), 
 passkey:assign 6 digits string or given NULL will be default "123456"*/
 EXTERNC NRFBLEAPI uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps, const char* passkey);

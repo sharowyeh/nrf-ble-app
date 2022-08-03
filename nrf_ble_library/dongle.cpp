@@ -1,5 +1,14 @@
 #include "dongle.h"
 #include "ble.h"
+//for nrf-ble-driver library compiling runtime library config /MT[d] or /MD[d],
+//macro refer to https://docs.microsoft.com/en-us/cpp/preprocessor/predefined-macros?view=msvc-160
+#if defined(_DLL) && !defined(_DEBUG)
+// NOTICE: nordic offical static lib only support /MD
+#pragma comment(lib, "nrf-ble-driver-sd_api_v5-mt-static-4_1_2.lib")
+#else
+// NOTICE: required nrf-ble-driver-sd_api_v5-mt-4_1_2.dll at output directory
+#pragma comment(lib, "nrf-ble-driver-sd_api_v5-mt-4_1_2.lib")
+#endif
 #include "sd_rpc.h"
 #include "security.h"
 
@@ -83,8 +92,14 @@ static adapter_t * m_adapter = NULL;
 /* Callback functions from caller */
 static std::map<fn_callback_id_t, std::vector<void*>> m_callback_fn_list;
 
-/* Advertising addresses */
-static std::map<uint64_t, ble_gap_evt_adv_report_t> m_adv_list; /*addr, report*/
+/* Advertising data */
+typedef struct _adv_data_t {
+	ble_gap_evt_adv_report_t adv_report;
+	std::map<uint8_t, data_t> type_data_list; /*BLE_GAP_AD_TYPE_DEFINITIONS, data*/
+} adv_data_t;
+
+/* Advertising data key pair by address */
+static std::map<uint64_t, adv_data_t> m_adv_list; /*addr, report*/
 
 /* Discovered characteristic data structure */
 typedef struct _dev_char_t {
@@ -111,6 +126,7 @@ static std::map<uint16_t, data_t> m_write_data; /* handle, p_data, data_len */
 static char m_log_msg[4096] = { 0 };
 #ifdef _DEBUG
 static log_level_t m_log_level = LOG_DEBUG;
+//static log_level_t m_log_level = LOG_TRACE;
 #else
 static log_level_t m_log_level = LOG_INFO;
 #endif
@@ -173,7 +189,7 @@ static ble_gap_sec_params_t m_sec_params =
 {
 	(uint8_t)1, /*bond*/
 	(uint8_t)0, /*mitm*/
-	(uint8_t)0, /*lesc*/
+	(uint8_t)1, /*lesc*/
 	(uint8_t)0, /*keypress*/
 	(uint8_t)BLE_GAP_IO_CAPS_KEYBOARD_ONLY, /*io_caps*/
 	(uint8_t)0, /*oob*/
@@ -221,12 +237,12 @@ static void log_file(char *level, const char * message)
 	strftime(path, sizeof(path), "log-%m-%d.log", &local);
 	strftime(time, sizeof(time), "%H:%M:%S", &local);
 	char ms[8] = { 0 };
-	sprintf_s(ms, ".%03d", chronoms.count());
+	sprintf_s(ms, ".%03d", (int)chronoms.count());
 	strcat_s(time, ms);
 
 	FILE *f;
 	errno_t err = fopen_s(&f, path, "a+");
-	if (err != 0)
+	if (err != 0 || f == 0)
 		return;
 
 	fprintf(f, "%s [%s] %s\n", time, level, message);
@@ -255,8 +271,11 @@ static void log_level(log_level_t level, const char *message, ...) {
 		break;
 
 	case SD_RPC_LOG_DEBUG: /*LOG_DEBUG*/
-	case SD_RPC_LOG_TRACE: /*LOG_TRACE*/
 		sprintf_s(label, "DEBUG");
+		break;
+
+	case SD_RPC_LOG_TRACE: /*LOG_TRACE*/
+		sprintf_s(label, "TRACE");
 		break;
 
 	default:
@@ -299,8 +318,7 @@ static void log_handler(adapter_t * adapter, sd_rpc_log_severity_t severity, con
  */
 static void status_handler(adapter_t * adapter, sd_rpc_app_status_t code, const char * message)
 {
-	sprintf_s(m_log_msg, "Adapter status: %d, message: %s", (uint32_t)code, message);
-	log_handler(adapter, SD_RPC_LOG_INFO, m_log_msg);
+	log_level(LOG_INFO, "Adapter status: %d, message: %s", (uint32_t)code, message);
 }
 
 
@@ -330,6 +348,71 @@ static void ble_address_to_uint64_convert(uint8_t addr[BLE_GAP_ADDR_LEN], uint64
 	{
 		*number += (uint64_t)addr[i] << (i * 8);
 	}
+}
+
+static uint32_t convert_byte_string(char* byte_array, uint32_t len, char* str);
+
+/* func duplicated from adv_report_parse splitted advertising data by each types */
+static uint32_t adv_report_data_slice(const ble_gap_evt_adv_report_t* p_adv_report, std::map<uint8_t, data_t>* pp_type_data)
+{
+	data_t   adv_data;
+
+	// Initialize advertisement report for parsing
+#if NRF_SD_BLE_API >= 6
+	adv_data.p_data = (uint8_t*)p_adv_report->data.p_data;
+	adv_data.data_len = p_adv_report->data.len;
+#else
+	adv_data.p_data = (uint8_t*)p_adv_report->data;
+	adv_data.data_len = p_adv_report->dlen;
+#endif
+
+	uint32_t  index = 0;
+	uint8_t* p_data;
+
+	char log_data[256] = { 0 };
+	convert_byte_string((char*)adv_data.p_data, adv_data.data_len, log_data);
+	log_level(LOG_TRACE, "Raw adv: %s", log_data);
+
+	p_data = adv_data.p_data;
+	
+	// advertising data format:
+	// https://docs.silabs.com/bluetooth/4.0/general/adv-and-scanning/bluetooth-adv-data-basics
+	// assigned numbers, for AD type
+	// https://btprodspecificationrefs.blob.core.windows.net/assigned-numbers/Assigned%20Number%20Types/Generic%20Access%20Profile.pdf
+
+	while (index < adv_data.data_len)
+	{
+		uint8_t field_length = p_data[index];
+		uint8_t field_type = p_data[index + 1];
+
+		data_t type_data = {
+			&p_data[index + 2],
+			field_length - 1
+		};
+		pp_type_data->insert_or_assign(field_type, type_data);
+		/*sprintf_s(m_log_msg, " type:%x datalen:%d", field_type, field_length);
+		log_level(LOG_DEBUG, m_log_msg);*/
+		index += field_length + 1;
+	}
+	return NRF_SUCCESS;
+}
+
+/* will find name in m_adv_list[].type_data_list */
+static bool get_adv_name(std::map<uint8_t, data_t>* pp_type_data, char* name)
+{
+	auto found = pp_type_data->find(BLE_GAP_AD_TYPE_COMPLETE_LOCAL_NAME);
+	if (found != pp_type_data->end()) {
+		memcpy(name, found->second.p_data, found->second.data_len);
+		return true;
+	}
+
+	found = pp_type_data->find(BLE_GAP_AD_TYPE_SHORT_LOCAL_NAME);
+	if (found != pp_type_data->end()) {
+		memcpy(name, found->second.p_data, found->second.data_len);
+		return true;
+	}
+
+	return false;
 }
 
 /**
@@ -367,6 +450,7 @@ static uint32_t adv_report_parse(uint8_t type, data_t * p_advdata, data_t * p_ty
 	return NRF_ERROR_NOT_FOUND;
 }
 
+// NOTICE: func has replaced by store adv data in type_data_list
 static bool get_adv_name(const ble_gap_evt_adv_report_t *p_adv_report, char * name)
 {
 	uint32_t err_code;
@@ -402,15 +486,16 @@ static bool get_adv_name(const ble_gap_evt_adv_report_t *p_adv_report, char * na
 		return true;
 	}
 
-	// Look for the manufacturing data if it was not found as complete
-	err_code = adv_report_parse(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA,
-		&adv_data,
-		&dev_name);
-	if (err_code == NRF_SUCCESS)
-	{
-		memcpy(name, dev_name.p_data, dev_name.data_len);
-		return true;
-	}
+	//NOTICE: only get readable ascii, otherwise refer to adv_report_data_slice()
+	//// Look for the manufacturing data if it was not found as complete
+	//err_code = adv_report_parse(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA,
+	//	&adv_data,
+	//	&dev_name);
+	//if (err_code == NRF_SUCCESS)
+	//{
+	//	memcpy(name, dev_name.p_data, dev_name.data_len);
+	//	return true;
+	//}
 
 	return false;
 }
@@ -561,12 +646,10 @@ uint32_t scan_start(float interval, float window, bool active, uint16_t timeout)
 	);
 
 	if (error_code != NRF_SUCCESS) {
-		sprintf_s(m_log_msg, "Scan start failed with error code: %d", error_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "Scan start failed with error code: %d", error_code);
 	}
 	else {
-		sprintf_s(m_log_msg, "Scan started");
-		log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+		log_level(LOG_INFO, "Scan started");
 	}
 
 	return error_code;
@@ -581,12 +664,10 @@ uint32_t scan_stop()
 	error_code = sd_ble_gap_scan_stop(m_adapter);
 
 	if (error_code != NRF_SUCCESS) {
-		sprintf_s(m_log_msg, "Scan stop failed, code: %d", error_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "Scan stop failed, code: %d", error_code);
 	}
 	else {
-		sprintf_s(m_log_msg, "Scan stop");
-		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+		log_level(LOG_INFO, "Scan stop");
 	}
 
 	return error_code;
@@ -608,13 +689,12 @@ uint32_t conn_start(uint8_t addr_type, uint8_t addr[6])
 	m_connection_param.max_conn_interval = MAX_CONNECTION_INTERVAL;
 	m_connection_param.slave_latency = 0;
 	m_connection_param.conn_sup_timeout = CONNECTION_SUPERVISION_TIMEOUT;
-	sprintf_s(m_log_msg, "conn start, conn params min=%d max=%d late=%d timeout=%d",
+	log_level(LOG_DEBUG, "conn start, conn params min=%d max=%d late=%d timeout=%d",
 		(int)(m_connection_param.min_conn_interval * 1.25),
 		(int)(m_connection_param.max_conn_interval * 1.25),
 		m_connection_param.slave_latency,
 		(int)(m_connection_param.conn_sup_timeout * 10));
-	log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
-
+	
 	//TODO: debug thu diff cfg
 	/*sd_ble_gap_connect(m_adapter, &(m_connected_addr), &m_scan_param, &m_connection_param, BLE_CONN_CFG_TAG_DEFAULT);
 	ble_gap_adv_params_t adv_param = { 0 };
@@ -631,8 +711,7 @@ uint32_t conn_start(uint8_t addr_type, uint8_t addr[6])
 	);
 	if (err_code != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "Connection Request Failed, reason %d", err_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "Connection Request Failed, reason %d", err_code);
 		return err_code;
 	}
 
@@ -641,27 +720,8 @@ uint32_t conn_start(uint8_t addr_type, uint8_t addr[6])
 	return err_code;
 }
 
-uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps, const char* passkey)
+uint32_t auth_config(bool lesc, bool oob, bool mitm)
 {
-	if (m_adapter == NULL)
-		return NRF_ERROR_INVALID_STATE;
-
-	// update fixed passkey
-	if (passkey) {
-		memcpy_s(m_passkey, 6, passkey, 6);
-	}
-
-	uint32_t error_code;
-
-	// try to get security mode before authenticate
-	ble_gap_conn_sec_t conn_sec;
-	error_code = sd_ble_gap_conn_sec_get(m_adapter, m_connection_handle, &conn_sec);
-	sprintf_s(m_log_msg, "get security, return=%d mode=%d level=%d", error_code, conn_sec.sec_mode.sm, conn_sec.sec_mode.lv);
-	log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
-
-	m_sec_params.bond = bond ? 1 : 0;
-	m_sec_params.keypress = keypress ? 1 : 0;
-	m_sec_params.io_caps = io_caps;
 	m_sec_params.lesc = 1; /* enable LE secure conn */
 	m_sec_params.oob = 0; /* set if has out of band auth data */
 	/* OOB enabled will use OOB method if:
@@ -681,17 +741,42 @@ uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps, const char* passk
 	m_sec_params.kdist_peer.enc = 1;
 	m_sec_params.kdist_peer.id = 1;
 
+	return NRF_SUCCESS;
+}
+
+uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps, const char* passkey)
+{
+	if (m_adapter == NULL)
+		return NRF_ERROR_INVALID_STATE;
+
+	// update fixed passkey
+	if (passkey) {
+		memcpy_s(m_passkey, 6, passkey, 6);
+	}
+
+	uint32_t error_code;
+
+	// try to get security mode before authenticate
+	ble_gap_conn_sec_t conn_sec;
+	error_code = sd_ble_gap_conn_sec_get(m_adapter, m_connection_handle, &conn_sec);
+	log_level(LOG_DEBUG, "get security, return=%d mode=%d level=%d",
+		error_code, conn_sec.sec_mode.sm, conn_sec.sec_mode.lv);
+
+	m_sec_params.bond = bond ? 1 : 0;
+	m_sec_params.keypress = keypress ? 1 : 0;
+	m_sec_params.io_caps = io_caps;
+	// NOTICE: refer to m_sec_params default value for other security options,
+	//   or change by auth_config() before authentication
+
 	// NOTICE: refer to driver, testcase_security.cpp, we'll use the default security params
 	error_code = sd_ble_gap_authenticate(m_adapter, m_connection_handle, &m_sec_params);
 	// NOTICE: for other devices, check if return NRF_ERROR_NOT_SUPPORTED or NRF_ERROR_NO_MEM?
 	//         driver test case uses for passkey auth, refer to testcase_security.cpp
-	sprintf_s(m_log_msg, "authenticate return=%d should be %d", error_code, NRF_SUCCESS);
-	log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+	log_level(LOG_DEBUG, "authenticate return=%d should be %d", error_code, NRF_SUCCESS);
 
 	if (error_code != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "Authenticate start Failed, code: %d", error_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "Authenticate start Failed, code: %d", error_code);
 	}
 
 	return error_code;
@@ -714,8 +799,7 @@ uint32_t service_discovery_start(uint16_t uuid, uint8_t type)
 
 	char uuid_string[STRING_BUFFER_SIZE] = { 0 };
 	get_uuid_string(uuid, uuid_string);
-	sprintf_s(m_log_msg, "Discovering primary service:0x%04X(%s)", uuid, uuid_string);
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+	log_level(LOG_INFO, "Discovering primary service:0x%04X(%s)", uuid, uuid_string);
 
 	srvc_uuid.type = type;
 	srvc_uuid.uuid = uuid;
@@ -726,8 +810,7 @@ uint32_t service_discovery_start(uint16_t uuid, uint8_t type)
 		&srvc_uuid/*NULL*/);
 	if (err_code != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "Failed to initiate or continue a GATT Primary Service Discovery procedure");
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "Failed to initiate or continue a GATT Primary Service Discovery procedure");
 	}
 
 	return err_code;
@@ -749,9 +832,8 @@ static uint32_t char_discovery_start(ble_gattc_handle_range_t handle_range)
 		handle_range.end_handle = m_service_end_handle;
 	}
 
-	sprintf_s(m_log_msg, "Discovering characteristics, handle range:0x%04X - 0x%04X",
+	log_level(LOG_INFO, "Discovering characteristics, handle range:0x%04X - 0x%04X",
 		handle_range.start_handle, handle_range.end_handle);
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
 
 	return sd_ble_gattc_characteristics_discover(m_adapter, m_connection_handle, &handle_range);
 }
@@ -772,9 +854,8 @@ static uint32_t descr_discovery_start(ble_gattc_handle_range_t handle_range)
 		handle_range.end_handle = m_service_end_handle;
 	}
 
-	sprintf_s(m_log_msg, "Discovering descriptors, handle range:0x%04X - 0x%04X",
+	log_level(LOG_INFO, "Discovering descriptors, handle range:0x%04X - 0x%04X",
 		handle_range.start_handle, handle_range.end_handle);
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
 
 	return sd_ble_gattc_descriptors_discover(m_adapter, m_connection_handle, &handle_range);
 }
@@ -795,8 +876,7 @@ static uint32_t read_device_name()
 		m_connection_handle,
 		value_handle, 0
 	);
-	sprintf_s(m_log_msg, " Read value from handle:0x%04X code:%d", value_handle, error_code);
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+	log_level(LOG_DEBUG, " Read value from handle:0x%04X code:%d", value_handle, error_code);
 	return error_code;
 }
 
@@ -832,23 +912,21 @@ static uint32_t set_cccd_notification(uint16_t handle)
 			write_params.offset = 0;
 			// write it!
 			error_code = sd_ble_gattc_write(m_adapter, m_connection_handle, &write_params);
-			sprintf_s(m_log_msg, " Write to register CCCD handle:0x%04X code:%d", m_char_list[m_char_idx].cccd_handle, error_code);
-			log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+			log_level(LOG_INFO, " Write to register CCCD handle:0x%04X code:%d",
+				m_char_list[m_char_idx].cccd_handle, error_code);
 			enable_next = true;
 			break;
 		}
 	}
 
 	if (enable_next == false) {
-		sprintf_s(m_log_msg, "List of characteristics with report reference data.");
-		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+		log_level(LOG_DEBUG, "List of characteristics with report reference data.");
 		uint16_t count = 0;
 		for (int i = 0; i < m_char_list.size(); i++) {
 			if (m_char_list[i].report_ref_is_read) {
-				sprintf_s(m_log_msg, " char:%04X desc:%04X reference data:%02x %02x", 
+				log_level(LOG_DEBUG, " char:%04X desc:%04X reference data:%02x %02x",
 					m_char_list[i].handle, m_char_list[i].report_ref_handle, 
 					m_char_list[i].report_ref[0], m_char_list[i].report_ref[1]);
-				log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 			}
 
 			if (m_char_list[i].report_ref_is_read || m_char_list[i].cccd_enabled) {
@@ -896,8 +974,8 @@ static uint32_t read_report_refs(uint16_t handle)
 				m_connection_handle,
 				m_char_list[m_char_idx].report_ref_handle, 0
 			);
-			sprintf_s(m_log_msg, " Read value from handle:0x%04X code:%d", m_char_list[m_char_idx].report_ref_handle, error_code);
-			log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+			log_level(LOG_INFO, " Read value from handle:0x%04X code:%d",
+				m_char_list[m_char_idx].report_ref_handle, error_code);
 			read_next = true;
 			// can only call next handle from read response
 			break;
@@ -946,7 +1024,7 @@ uint32_t device_find(uint8_t addr[6], int8_t rssi, const char* passkey, uint16_t
 		elapsed += 100;
 		target = m_adv_list.begin();
 		for (; target != m_adv_list.end(); target++) {
-			if (target->second.rssi < rssi)
+			if (target->second.adv_report.rssi < rssi)
 				continue;
 			if (addr != NULL) {
 				uint64_t addr_num = 0;
@@ -971,7 +1049,7 @@ uint32_t device_find(uint8_t addr[6], int8_t rssi, const char* passkey, uint16_t
 		return NRF_ERROR_TIMEOUT;
 	}
 
-	error_code = conn_start(target->second.peer_addr.addr_type, target->second.peer_addr.addr);
+	error_code = conn_start(target->second.adv_report.peer_addr.addr_type, target->second.adv_report.peer_addr.addr);
 	if (error_code != NRF_SUCCESS) {
 		return error_code;
 	}
@@ -1062,7 +1140,7 @@ uint32_t report_char_list(uint16_t *handle_list, uint8_t *refs_list, uint16_t *l
 	return NRF_SUCCESS;
 }
 
-uint32_t data_read_async(uint16_t handle)
+EXTERNC NRFBLEAPI uint32_t data_read_async(uint16_t handle)
 {
 	if (m_adapter == NULL)
 		return NRF_ERROR_INVALID_STATE;
@@ -1073,8 +1151,7 @@ uint32_t data_read_async(uint16_t handle)
 		m_connection_handle,
 		handle, 0
 	);
-	sprintf_s(m_log_msg, " Read value from handle:0x%04X code:%d", handle, error_code);
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+	log_level(LOG_INFO, " Read value from handle:0x%04X code:%d", handle, error_code);
 
 	return error_code;
 }
@@ -1120,11 +1197,11 @@ uint32_t data_read_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t *l
 	}
 	sprintf_s(m_log_msg, " Read value handle found: 0x%04X ref:", handle);
 	convert_byte_string((char *)report_ref, 2, &(m_log_msg[strlen(m_log_msg)]));
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+	log_level(LOG_INFO, m_log_msg);
 	return data_read(handle, data, len, timeout);
 }
 
-uint32_t data_write_async(uint16_t handle, uint8_t* data, uint16_t len)
+EXTERNC NRFBLEAPI uint32_t data_write_async(uint16_t handle, uint8_t* data, uint16_t len)
 {
 	if (m_adapter == NULL)
 		return NRF_ERROR_INVALID_STATE;
@@ -1146,9 +1223,8 @@ uint32_t data_write_async(uint16_t handle, uint8_t* data, uint16_t len)
 	write_params.offset = 0;
 	uint32_t error_code = 0;
 	error_code = sd_ble_gattc_write(m_adapter, m_connection_handle, &write_params);
-	sprintf_s(m_log_msg, " Write value to handle:0x%04X data:0x%02x %02x code:%d",
+	log_level(LOG_INFO, " Write value to handle:0x%04X data:0x%02x %02x code:%d",
 		handle, m_write_data[handle].p_data[0], m_write_data[handle].p_data[1], error_code);
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
 	return error_code;
 }
 
@@ -1187,7 +1263,7 @@ uint32_t data_write_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t l
 	}
 	sprintf_s(m_log_msg, " Write value handle found: 0x%04X ref:", handle);
 	convert_byte_string((char *)report_ref, 2, &(m_log_msg[strlen(m_log_msg)]));
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+	log_level(LOG_INFO, m_log_msg);
 	return data_write(handle, data, len, timeout);
 }
 
@@ -1198,8 +1274,7 @@ uint32_t dongle_disconnect()
 
 	uint32_t error_code = 0;
 	error_code = sd_ble_gap_disconnect(m_adapter, m_connection_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
-	sprintf_s(m_log_msg, "User disconnect, code:%d", error_code);
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+	log_level(LOG_INFO, "User disconnect, code:%d", error_code);
 	connection_cleanup();
 	return error_code;
 }
@@ -1258,22 +1333,36 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 	uint64_t addr_num = 0;
 	ble_address_to_uint64_convert((uint8_t *)p_ble_gap_evt->params.adv_report.peer_addr.addr, &addr_num);
 
-	// list always up-to-date, report to caller if new arrival or rssi updated
-	//bool new_arrival = (m_adv_list.find(addr_num) == m_adv_list.end());
-	bool new_arrival = m_adv_list[addr_num].rssi != p_ble_gap_evt->params.adv_report.rssi;
-	m_adv_list.insert_or_assign(addr_num, p_ble_gap_evt->params.adv_report);
+	// adv list always up-to-date
+	bool arrival = (m_adv_list.find(addr_num) == m_adv_list.end());
+	if (arrival) {
+		adv_data_t adv_data = {
+			p_ble_gap_evt->params.adv_report
+		};
+		m_adv_list.insert_or_assign(addr_num, adv_data);
+	}
+	//m_adv_list.insert_or_assign(addr_num, p_ble_gap_evt->params.adv_report);
 
-	if (new_arrival)
+	adv_report_data_slice(&p_ble_gap_evt->params.adv_report, &m_adv_list[addr_num].type_data_list);
+	log_level(LOG_TRACE, "Scan addr:%llx parsed advertising data list:%lu", addr_num, m_adv_list[addr_num].type_data_list.size());
+
+	// TODO: caller update if any or rssi changed?
+	//bool update = true;
+	bool update = m_adv_list[addr_num].adv_report.rssi != p_ble_gap_evt->params.adv_report.rssi;
+	if (update)
 	{
 		// Log the Bluetooth device address of advertisement packet received.
 		ble_address_to_string_convert(p_ble_gap_evt->params.adv_report.peer_addr, str);
 
 		char name[256] = { 0 };
-		get_adv_name(&p_ble_gap_evt->params.adv_report, name);
+		// Just get name from m_adv_list[].type_data_list[]
+		get_adv_name(&m_adv_list[addr_num].type_data_list, name);
+		//get_adv_name(&p_ble_gap_evt->params.adv_report, name);
+
 #if NRF_SD_BLE_API >= 6
 		uint8_t  str2[STRING_BUFFER_SIZE] = { 0 };
 		ble_address_to_string_convert(p_ble_gap_evt->params.adv_report.direct_addr, str2);
-		sprintf_s(m_log_msg, "Received adv report peer:0x%s direct:0x%s name:%s\r\n \
+		log_level(LOG_DEBUG, "Received adv report peer:0x%s direct:0x%s name:%s\r\n \
 			rssi:%d type:%d chidx:%d dataid:%d priphy:%d setid:%d txpwr:%d auxoff:%d auxphy:%d",
 			str, str2, name,
 			p_ble_gap_evt->params.adv_report.rssi,
@@ -1285,22 +1374,22 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 			p_ble_gap_evt->params.adv_report.tx_power,
 			p_ble_gap_evt->params.adv_report.aux_pointer.aux_offset,
 			p_ble_gap_evt->params.adv_report.aux_pointer.aux_phy);
-		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 
 #elif NRF_SD_BLE_API >= 5
-		sprintf_s(m_log_msg, "Received adv report address: 0x%s rssi:%d type:%d rsp:%d name:%s",
+		log_level(LOG_DEBUG, "Received adv report address: 0x%s rssi:%d type:%d rsp:%d list:%lu name:%s",
 			str, p_ble_gap_evt->params.adv_report.rssi,
 			p_ble_gap_evt->params.adv_report.type,
-			p_ble_gap_evt->params.adv_report.scan_rsp, name);
-		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+			p_ble_gap_evt->params.adv_report.scan_rsp,
+			m_adv_list[addr_num].type_data_list.size(),
+			name);
 
-		if (p_ble_gap_evt->params.adv_report.scan_rsp == 0) {
+		if (p_ble_gap_evt->params.adv_report.scan_rsp == 0 /*||
+			p_ble_gap_evt->params.adv_report.type != BLE_GAP_ADV_TYPE_ADV_IND*/) {
 			return;
 		}
 #endif
 		if (m_connection_is_in_progress) {
-			sprintf_s(m_log_msg, "Connection has been started, ignore rest of discovered devices");
-			log_handler(m_adapter, SD_RPC_LOG_WARNING, m_log_msg);
+			log_level(LOG_WARNING, "Connection has been started, ignore rest of discovered devices");
 			return;
 		}
 
@@ -1364,10 +1453,9 @@ static void on_timeout(const ble_gap_evt_t * const p_ble_gap_evt)
  */
 static void on_connected(const ble_gap_evt_t * const p_ble_gap_evt)
 {
-	sprintf_s(m_log_msg, "Connection established role=%d",
+	log_level(LOG_INFO, "Connection established role=%d",
 		p_ble_gap_evt->params.connected.role); /* BLE_GAP_ROLE_PERIPH 0x1, BLE_GAP_ROLE_CENTRAL 0x2 */
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
-
+	
 	m_connected_devices++;
 	m_connection_handle = p_ble_gap_evt->conn_handle;
 	m_connection_is_in_progress = false;
@@ -1400,9 +1488,8 @@ BLE_HCI_CONNECTION_TIMEOUT 0x8
 BLE_HCI_LOCAL_HOST_TERMINATED_CONNECTION 0x16
 */
 static void on_disconnected(const ble_gap_evt_t *const p_ble_gap_evt) {
-	sprintf_s(m_log_msg, "Disconnected, reason: 0x%02X",
+	log_level(LOG_INFO, "Disconnected, reason: 0x%02X",
 		p_ble_gap_evt->params.disconnected.reason);
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
 
 	m_connected_devices--;
 	m_connection_handle = 0;
@@ -1427,19 +1514,16 @@ static void on_service_discovery_response(const ble_gattc_evt_t * const p_ble_ga
 
 	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "Service discovery failed. Error code 0x%X", p_ble_gattc_evt->gatt_status);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "Service discovery failed. Error code 0x%X", p_ble_gattc_evt->gatt_status);
 		return;
 	}
 
 	count = p_ble_gattc_evt->params.prim_srvc_disc_rsp.count;
-	sprintf_s(m_log_msg, "Received service discovery response, service count:%d", count);
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+	log_level(LOG_INFO, "Received service discovery response, service count:%d", count);
 
 	if (count == 0)
 	{
-		sprintf_s(m_log_msg, "Service not found");
-		log_handler(m_adapter, SD_RPC_LOG_WARNING, m_log_msg);
+		log_level(LOG_WARNING, "Service not found");
 		return;
 	}
 
@@ -1449,9 +1533,9 @@ static void on_service_discovery_response(const ble_gattc_evt_t * const p_ble_ga
 
 	char uuid_string[STRING_BUFFER_SIZE] = { 0 };
 	get_uuid_string(service->uuid.uuid, uuid_string);
-	sprintf_s(m_log_msg, "Service discovered UUID: 0x%04X(%s), handle range:0x%04X - 0x%04X", service->uuid.uuid, uuid_string,
+	log_level(LOG_DEBUG, "Service discovered UUID: 0x%04X(%s), handle range:0x%04X - 0x%04X",
+		service->uuid.uuid, uuid_string,
 		service->handle_range.start_handle, service->handle_range.end_handle);
-	log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 
 	m_service_start_handle = service->handle_range.start_handle;
 	m_service_end_handle = service->handle_range.end_handle;
@@ -1471,9 +1555,8 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
 
 	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS || count == 0)
 	{
-		sprintf_s(m_log_msg, " Characteristic discovery failed or empty, code 0x%X count=%d",
+		log_level(LOG_WARNING, " Characteristic discovery failed or empty, code 0x%X count=%d",
 			p_ble_gattc_evt->gatt_status, count);
-		log_handler(m_adapter, SD_RPC_LOG_WARNING, m_log_msg);
 
 		m_cond_find.notify_all();
 
@@ -1484,21 +1567,22 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
 		return;
 	}
 
-	sprintf_s(m_log_msg, " Received characteristic discovery response, characteristics count: %d", count);
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+	log_level(LOG_INFO, " Received characteristic discovery response, characteristics count: %d", count);
 
 	char uuid_string[STRING_BUFFER_SIZE] = { 0 };
 	for (int i = 0; i < count; i++)
 	{
 		memset(uuid_string, 0, sizeof(uuid_string));
 		get_uuid_string(p_ble_gattc_evt->params.char_disc_rsp.chars[i].uuid.uuid, uuid_string);
-		sprintf_s(m_log_msg, " Characteristic handle:0x%04X, UUID: 0x%04X(%s) decl:0x%04X prop(LSB):0x%x",
+		log_level(LOG_DEBUG, " Characteristic handle:0x%04X, UUID: 0x%04X(%s) decl:0x%04X prop(LSB):0x%x, r/w/n:%d/%d/%d",
 			p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value,
 			p_ble_gattc_evt->params.char_disc_rsp.chars[i].uuid.uuid,
 			uuid_string,
 			p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_decl,
-			p_ble_gattc_evt->params.char_disc_rsp.chars[i].char_props);
-		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+			p_ble_gattc_evt->params.char_disc_rsp.chars[i].char_props,
+			p_ble_gattc_evt->params.char_disc_rsp.chars[i].char_props.read,
+			p_ble_gattc_evt->params.char_disc_rsp.chars[i].char_props.write,
+			p_ble_gattc_evt->params.char_disc_rsp.chars[i].char_props.notify);
 
 		// store characteristic to list
 		if (m_char_list.size() > 0) {
@@ -1536,8 +1620,8 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 
 	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS || count == 0)
 	{
-		sprintf_s(m_log_msg, " Descriptor discovery failed or empty, code 0x%X count=%d", p_ble_gattc_evt->gatt_status, count);
-		log_handler(m_adapter, SD_RPC_LOG_WARNING, m_log_msg);
+		log_level(LOG_WARNING, " Descriptor discovery failed or empty, code 0x%X count=%d",
+			p_ble_gattc_evt->gatt_status, count);
 
 		m_cond_find.notify_all();
 
@@ -1548,8 +1632,7 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 		return;
 	}
 
-	sprintf_s(m_log_msg, " Received descriptor discovery response, descriptor count: %d", count);
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+	log_level(LOG_INFO, " Received descriptor discovery response, descriptor count: %d", count);
 
 	uint16_t last_handle = 0;
 	char uuid_string[STRING_BUFFER_SIZE] = { 0 };
@@ -1557,11 +1640,10 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 	{
 		memset(uuid_string, 0, sizeof(uuid_string));
 		get_uuid_string(p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid, uuid_string);
-		sprintf_s(m_log_msg, " Descriptor handle: 0x%04X, UUID: 0x%04X(%s)",
+		log_level(LOG_DEBUG, " Descriptor handle: 0x%04X, UUID: 0x%04X(%s)",
 			p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle,
 			p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid,
 			uuid_string);
-		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 
 		// store descriptor to list
 		ble_gattc_desc_t dev_desc = p_ble_gattc_evt->params.desc_disc_rsp.descs[i];
@@ -1571,15 +1653,13 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_CCCD)
 		{
 			m_char_list[m_char_idx].cccd_handle = dev_desc.handle;
-			sprintf_s(m_log_msg, " CCCD descriptor saved, handle=%x", dev_desc.handle);
-			log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+			log_level(LOG_DEBUG, " CCCD descriptor saved, handle=%x", dev_desc.handle);
 		}
 		//DEBUG: set report reference handle, refer to read_report_refs()
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_REPORT_REF_DESCR)
 		{
 			m_char_list[m_char_idx].report_ref_handle = dev_desc.handle;
-			sprintf_s(m_log_msg, " Report reference descriptor saved, handle=%x", dev_desc.handle);
-			log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+			log_level(LOG_DEBUG, " Report reference descriptor saved, handle=%x", dev_desc.handle);
 		}
 
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_BATTERY_LEVEL_CHAR)
@@ -1589,15 +1669,13 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 			//BLE_GATT_STATUS_ATTERR_WRITE_NOT_PERMITTED
 			// Cannot write hvx enabling notification messages
 			m_battery_level_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
-			sprintf_s(m_log_msg, " Battery level handle saved, handle=%x", m_battery_level_handle);
-			log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+			log_level(LOG_DEBUG, " Battery level handle saved, handle=%x", m_battery_level_handle);
 		}
 
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_GAP_CHARACTERISTIC_DEVICE_NAME)
 		{
 			m_device_name_handle = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
-			sprintf_s(m_log_msg, " Device name handle saved");
-			log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+			log_level(LOG_DEBUG, " Device name handle saved");
 		}
 
 		m_service_start_handle = std::max(m_service_start_handle, p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle);
@@ -1629,25 +1707,22 @@ static void on_read_characteristic_value_by_uuid_response(const ble_gattc_evt_t 
 {
 	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "Error read char val by uuid operation, error code 0x%x", p_ble_gattc_evt->gatt_status);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "Error read char val by uuid operation, error code 0x%x", p_ble_gattc_evt->gatt_status);
 		return;
 	}
 
 	if (p_ble_gattc_evt->params.char_val_by_uuid_read_rsp.count == 0 ||
 		p_ble_gattc_evt->params.char_val_by_uuid_read_rsp.value_len == 0)
 	{
-		sprintf_s(m_log_msg, "Error read char val by uuid operation, no handle count or value length");
-		log_handler(m_adapter, SD_RPC_LOG_WARNING, m_log_msg);
+		log_level(LOG_WARNING, "Error read char val by uuid operation, no handle count or value length");
 		return;
 	}
 
 	for (int i = 0; i < p_ble_gattc_evt->params.char_val_by_uuid_read_rsp.count; i++)
 	{
-		sprintf_s(m_log_msg, "Received read char by uuid, value handle:0x%04X len:%d.",
+		log_level(LOG_DEBUG, "Received read char by uuid, value handle:0x%04X len:%d.",
 			p_ble_gattc_evt->params.char_val_by_uuid_read_rsp.handle_value[i],
 			p_ble_gattc_evt->params.char_val_by_uuid_read_rsp.value_len);
-		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 	}
 
 	//DEBUG: directly use handle from descriptor?
@@ -1657,23 +1732,21 @@ static void on_read_characteristic_value_by_uuid_response(const ble_gattc_evt_t 
 		p_ble_gattc_evt->params.char_val_by_uuid_read_rsp.handle_value[0],
 		0
 	);
-	sprintf_s(m_log_msg, " read from handle0:0x%04X", p_ble_gattc_evt->params.char_val_by_uuid_read_rsp.handle_value[0]);
-	log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+	log_level(LOG_DEBUG, " read from handle0:0x%04X", 
+		p_ble_gattc_evt->params.char_val_by_uuid_read_rsp.handle_value[0]);
 }
 
 static void on_read_characteristic_values_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 {
 	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "Error read char vals operation, error code 0x%x", p_ble_gattc_evt->gatt_status);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "Error read char vals operation, error code 0x%x", p_ble_gattc_evt->gatt_status);
 		return;
 	}
 
 	if (p_ble_gattc_evt->params.char_vals_read_rsp.len == 0)
 	{
-		sprintf_s(m_log_msg, "Error read char vals operation, no att values length");
-		log_handler(m_adapter, SD_RPC_LOG_WARNING, m_log_msg);
+		log_level(LOG_WARNING, "Error read char vals operation, no att values length");
 		return;
 	}
 
@@ -1684,7 +1757,7 @@ static void on_read_characteristic_values_response(const ble_gattc_evt_t *const 
 	//memcpy_s(&read_bytes[0], DATA_BUFFER_SIZE, p_data, len);
 	sprintf_s(m_log_msg, "Received read char vals len:%d data: ", len);
 	convert_byte_string((char *)p_data, len, &(m_log_msg[strlen(m_log_msg)]));
-	log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+	log_level(LOG_DEBUG, m_log_msg);
 }
 
 static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
@@ -1696,9 +1769,8 @@ static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 	{
 		// refer to BLE_GATT_STATUS_ATTERR_INSUF_AUTHENTICATION if handle access required authentication
 		// refer to BLE_GATT_STATUS_ATTERR_REQUEST_NOT_SUPPORTED if handle property not permitted
-		sprintf_s(m_log_msg, "Error. Read operation failed or data empty, handle:0x%04X code 0x%x",
-			rsp_handle, p_ble_gattc_evt->gatt_status);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg); //TODO: or warning?
+		log_level(LOG_ERROR, "Error. Read operation failed or data empty, handle:0x%04X code 0x%x",
+			rsp_handle, p_ble_gattc_evt->gatt_status); //TODO: or warning?
 		//TODO: do something next if any error occurred
 
 		m_cond_read_write.notify_all();
@@ -1713,7 +1785,7 @@ static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 	//memcpy_s(&read_bytes[0], DATA_BUFFER_SIZE, p_data + offset, len);
 	sprintf_s(m_log_msg, "Received read response handle:0x%04X len:%d data: ", rsp_handle, len);
 	convert_byte_string((char *)p_data, len, &(m_log_msg[strlen(m_log_msg)]));
-	log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+	log_level(LOG_DEBUG, m_log_msg);
 
 	// NOTICE: refer to on_characteristic_discovery_response has pre-allocated memory
 	if (m_read_data[rsp_handle].p_data == nullptr)
@@ -1746,9 +1818,8 @@ static void on_write_response(const ble_gattc_evt_t * const p_ble_gattc_evt)
 
 	if (p_ble_gattc_evt->gatt_status != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "Error. Write operation failed or data empty. handle 0x%04X code 0x%X",
-			rsp_handle, p_ble_gattc_evt->gatt_status);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg); //TODO: or warning?
+		log_level(LOG_ERROR, "Error. Write operation failed or data empty. handle 0x%04X code 0x%X",
+			rsp_handle, p_ble_gattc_evt->gatt_status); //TODO: or warning?
 		m_cond_read_write.notify_all();
 		return;
 	}
@@ -1757,8 +1828,7 @@ static void on_write_response(const ble_gattc_evt_t * const p_ble_gattc_evt)
 	uint16_t offset = p_ble_gattc_evt->params.write_rsp.offset;
 	uint16_t len = p_ble_gattc_evt->params.write_rsp.len;
 
-	sprintf_s(m_log_msg, "Sent write response handle:0x%04X len:%d data: ...", rsp_handle, len);
-	log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+	log_level(LOG_DEBUG, "Sent write response handle:0x%04X len:%d data: ...", rsp_handle, len);
 
 	// NOTICE: refer to on_characteristic_discovery_response has pre-allocated memory
 	if (m_write_data[rsp_handle].p_data == nullptr)
@@ -1800,8 +1870,7 @@ static void on_hvx(const ble_gattc_evt_t * const p_ble_gattc_evt)
 		}
 	}
 	if (char_idx == -1) {
-		sprintf_s(m_log_msg, "Received hvx from handle:0x%04X not in list", hvx_handle);
-		log_handler(m_adapter, SD_RPC_LOG_WARNING, m_log_msg);
+		log_level(LOG_WARNING, "Received hvx from handle:0x%04X not in list", hvx_handle);
 		return;
 	}
 
@@ -1818,7 +1887,7 @@ static void on_hvx(const ble_gattc_evt_t * const p_ble_gattc_evt)
 
 	msg_pos += sprintf_s(msg_pos, 16, "len:%d data: ", len);
 	convert_byte_string((char*)p_data, len, msg_pos);
-	log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+	log_level(LOG_DEBUG, m_log_msg);
 
 	// NOTICE: refer to on_characteristic_discovery_response has pre-allocated memory
 	if (m_read_data[hvx_handle].p_data == nullptr)
@@ -1843,18 +1912,16 @@ static void on_conn_params_update_request(const ble_gap_evt_t * const p_ble_gap_
 		params.conn_param_update_request.conn_params;
 	uint32_t err_code = sd_ble_gap_conn_param_update(m_adapter, m_connection_handle,
 		&(conn_params));
-	sprintf_s(m_log_msg, "connection update request code=%d min=%d max=%d late=%d timeout=%d",
+	log_level(LOG_DEBUG, "connection update request code=%d min=%d max=%d late=%d timeout=%d",
 		err_code,
 		(int)(conn_params.min_conn_interval * 1.25),
 		(int)(conn_params.max_conn_interval * 1.25),
 		conn_params.slave_latency,
 		(int)(conn_params.conn_sup_timeout / 100));
-	log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 
 	if (err_code != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "Conn params update failed, err_code %d", err_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "Conn params update failed, err_code %d", err_code);
 	}
 }
 
@@ -1865,17 +1932,16 @@ static void on_conn_params_update(const ble_gap_evt_t * const p_ble_gap_evt)
 {
 	auto conn_params = &(p_ble_gap_evt->params.conn_param_update.conn_params);
 
-	sprintf_s(m_log_msg, "Connection params updated, interval:%d[ms] latency:%d timeout:%d[ms]",
+	log_level(LOG_INFO, "Connection params updated, interval:%d[ms] latency:%d timeout:%d[ms]",
 		(int)(conn_params->min_conn_interval * 1.25),
 		conn_params->slave_latency,
 		(int)(conn_params->conn_sup_timeout * 100));
-	log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
 
 	uint32_t error_code;
 	ble_gap_conn_sec_t conn_sec;
 	error_code = sd_ble_gap_conn_sec_get(m_adapter, m_connection_handle, &conn_sec);
-	sprintf_s(m_log_msg, " get security code=%d mode=%d level=%d", error_code, conn_sec.sec_mode.sm, conn_sec.sec_mode.lv);
-	log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+	log_level(LOG_DEBUG, " get security code=%d mode=%d level=%d",
+		error_code, conn_sec.sec_mode.sm, conn_sec.sec_mode.lv);
 }
 
 /*
@@ -1885,11 +1951,10 @@ static void on_sec_params_request(const ble_gap_evt_t * const p_ble_gap_evt)
 {
 	auto peer_params = p_ble_gap_evt->params.sec_params_request.peer_params;
 
-	sprintf_s(m_log_msg, " on security params request, peer: bond=%d io=%d min=%d max=%d ownenc=%d peerenc=%d",
+	log_level(LOG_DEBUG, " on security params request, peer: bond=%d io=%d min=%d max=%d ownenc=%d peerenc=%d",
 		peer_params.bond, peer_params.io_caps,
 		peer_params.min_key_size, peer_params.max_key_size,
 		peer_params.kdist_own.enc, peer_params.kdist_peer.enc);
-	log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 
 	memcpy_s(m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, m_public_key, ECC_P256_PK_LEN);
 	sprintf_s(m_log_msg, " own_pk= ");
@@ -1908,8 +1973,7 @@ static void on_sec_params_request(const ble_gap_evt_t * const p_ble_gap_evt)
 	// NOTICE: to the peripheral role, given security_param as null, generate public key to keyset
 	uint32_t err_code = sd_ble_gap_sec_params_reply(
 		m_adapter, m_connection_handle, BLE_GAP_SEC_STATUS_SUCCESS, 0, &sec_keyset);
-	sprintf_s(m_log_msg, " on security params request, return=%d should be %d", err_code, NRF_SUCCESS);
-	log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+	log_level(LOG_DEBUG, " on security params request, return=%d should be %d", err_code, NRF_SUCCESS);
 }
 
 
@@ -1948,7 +2012,7 @@ static void on_exchange_mtu_response(const ble_gattc_evt_t* const p_ble_gattc_ev
 {
 	uint16_t server_rx_mtu = p_ble_gattc_evt->params.exchange_mtu_rsp.server_rx_mtu;
 
-	printf("MTU response received. New ATT_MTU is %d\n", server_rx_mtu);
+	log_level(LOG_DEBUG, "MTU response received. New ATT_MTU is %d\n", server_rx_mtu);
 	fflush(stdout);
 }
 #endif
@@ -1968,8 +2032,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 {
 	if (p_ble_evt == NULL)
 	{
-		sprintf_s(m_log_msg, "Received an empty BLE event");
-		log_handler(m_adapter, SD_RPC_LOG_WARNING, m_log_msg);
+		log_level(LOG_WARNING, "Received an empty BLE event");
 		return;
 	}
 
@@ -1998,7 +2061,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 
 	case BLE_GAP_EVT_SEC_REQUEST:
 	{
-		sprintf_s(m_log_msg, "on sec request");
+		log_level(LOG_TRACE, "on sec request");
 	}break;
 
 	case BLE_GAP_EVT_SEC_PARAMS_REQUEST:
@@ -2007,18 +2070,16 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		break;
 
 	case BLE_GAP_EVT_CONN_SEC_UPDATE:
-		sprintf_s(m_log_msg, " on conn security updated, mode=%d level=%d",
+		log_level(LOG_DEBUG, " on conn security updated, mode=%d level=%d",
 			p_ble_evt->evt.gap_evt.params.conn_sec_update.conn_sec.sec_mode.sm,
 			p_ble_evt->evt.gap_evt.params.conn_sec_update.conn_sec.sec_mode.lv);
-		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 		break;
 
 	case BLE_GAP_EVT_AUTH_STATUS:
 	{
-		sprintf_s(m_log_msg, " on auth status, status=%d, bond=%d",
+		log_level(LOG_DEBUG, " on auth status, status=%d, bond=%d",
 			p_ble_evt->evt.gap_evt.params.auth_status.auth_status,
 			p_ble_evt->evt.gap_evt.params.auth_status.bonded);
-		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 
 		// check auth status and bonded by given security parameter
 		// NOTICE: w/o bond may not have enough privilege interacting most services
@@ -2049,10 +2110,9 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 	case BLE_GAP_EVT_LESC_DHKEY_REQUEST:
 	{
 		// if sd_ble_gap_authenticate lesc = 1
-		sprintf_s(m_log_msg, " on lesc dhkey request, oobd_req=%d, peer_pk0=%d",
+		log_level(LOG_DEBUG, " on lesc dhkey request, oobd_req=%d, peer_pk0=%d",
 			p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.oobd_req,
 			p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.p_pk_peer->pk[0]);
-		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
 
 		// print peer pubkey
 		sprintf_s(m_log_msg, " peer_pk= ");
@@ -2101,18 +2161,15 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		// provide fixed passkey
 		if (key_type == BLE_GAP_AUTH_KEY_TYPE_PASSKEY) {
 			key = (uint8_t*)&m_passkey[0];
-			sprintf_s(m_log_msg, " use %s for passkey", m_passkey);
-			log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+			log_level(LOG_INFO, " use %s for passkey", m_passkey);
 		}
 		else if (key_type == BLE_GAP_AUTH_KEY_TYPE_OOB) {
 			//TODO: not implemented
-			sprintf_s(m_log_msg, " on auth key req by OOB not implemented");
-			log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+			log_level(LOG_DEBUG, " on auth key req by OOB not implemented");
 			break;
 		}
 		err_code = sd_ble_gap_auth_key_reply(m_adapter, m_connection_handle, key_type, key);
-		sprintf_s(m_log_msg, " on auth key req, keytype:%d return:%d", key_type, err_code);
-		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+		log_level(LOG_DEBUG, " on auth key req, keytype:%d return:%d", key_type, err_code);
 
 		if (m_callback_fn_list[FN_ON_PASSKEY_REQUIRED].size() > 0) {
 			std::string str = std::string(m_passkey);
@@ -2130,11 +2187,10 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		sprintf_s(m_log_msg, " on passkey display, key: ");
 		for (int i = 0; i < 6 && key[i]; i++)
 			strcat_s(m_log_msg, (char*)key[i]);
-		log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+		log_level(LOG_INFO, m_log_msg);
 
 		err_code = sd_ble_gap_auth_key_reply(m_adapter, m_connection_handle, BLE_GAP_AUTH_KEY_TYPE_PASSKEY, key);
-		sprintf_s(m_log_msg, " on passkey display auth reply, code:%d", err_code);
-		log_handler(m_adapter, SD_RPC_LOG_DEBUG, m_log_msg);
+		log_level(LOG_DEBUG, " on passkey display auth reply, code:%d", err_code);
 
 		if (m_callback_fn_list[FN_ON_PASSKEY_REQUIRED].size() > 0) {
 			std::string str = std::string((char*)key, 6);
@@ -2193,14 +2249,12 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 
 #if NRF_SD_BLE_API >= 3
 	case BLE_GATTS_EVT_EXCHANGE_MTU_REQUEST:
-		sprintf_s(m_log_msg, "evt exchange mtu request.");
-		log_level(LOG_DEBUG, m_log_msg);
+		log_level(LOG_DEBUG, "evt exchange mtu request.");
 		on_exchange_mtu_request(&(p_ble_evt->evt.gatts_evt));
 		break;
 
 	case BLE_GATTC_EVT_EXCHANGE_MTU_RSP:
-		sprintf_s(m_log_msg, "evt exchange mtu response.");
-		log_level(LOG_DEBUG, m_log_msg);
+		log_level(LOG_DEBUG, "evt exchange mtu response.");
 		on_exchange_mtu_response(&(p_ble_evt->evt.gattc_evt));
 		break;
 #endif
@@ -2208,17 +2262,15 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 #if NRF_SD_BLE_API >= 5
 
 	case BLE_GATTC_EVT_WRITE_CMD_TX_COMPLETE:
-		sprintf_s(m_log_msg, "write cmd tx complete.");
-		log_level(LOG_DEBUG, m_log_msg);
+		log_level(LOG_DEBUG, "write cmd tx complete.");
 		break;
 
 	case BLE_GAP_EVT_DATA_LENGTH_UPDATE:
-		sprintf_s(m_log_msg, "Maximum packet length updated: rx=%d bytes, %d us, tx=%d bytes, %d us",
+		log_level(LOG_INFO, "Maximum packet length updated: rx=%d bytes, %d us, tx=%d bytes, %d us",
 			p_ble_evt->evt.gap_evt.params.data_length_update.effective_params.max_rx_octets,
 			p_ble_evt->evt.gap_evt.params.data_length_update.effective_params.max_rx_time_us,
 			p_ble_evt->evt.gap_evt.params.data_length_update.effective_params.max_tx_octets,
 			p_ble_evt->evt.gap_evt.params.data_length_update.effective_params.max_tx_time_us);
-		log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
 		break;
 
 	case BLE_GAP_EVT_DATA_LENGTH_UPDATE_REQUEST:
@@ -2226,12 +2278,11 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		//https://infocenter.nordicsemi.com/topic/com.nordic.infocenter.s132.api.v5.0.0/s132_msc_overview.html?cp=4_7_3_7_1
 		// GAP MSC -> Data Length Update Procedure
 		auto peer_params = p_ble_evt->evt.gap_evt.params.data_length_update_request.peer_params;
-		sprintf_s(m_log_msg, "evt data len update request rx=%d bytes, %d us, tx=%d bytes, %d us",
+		log_level(LOG_DEBUG, "evt data len update request rx=%d bytes, %d us, tx=%d bytes, %d us",
 			peer_params.max_rx_octets,
 			peer_params.max_rx_time_us,
 			peer_params.max_tx_octets,
 			peer_params.max_tx_time_us);
-		log_level(LOG_DEBUG, m_log_msg);
 
 #define NRF_SDH_BLE_GAP_DATA_LENGTH 251
 
@@ -2242,21 +2293,18 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		m_data_length.max_tx_time_us = BLE_GAP_DATA_LENGTH_AUTO;
 		ble_gap_data_length_limitation_t m_data_limit = { 0 };
 		auto err_code = sd_ble_gap_data_length_update(m_adapter, m_connection_handle, &m_data_length, NULL);
-		sprintf_s(m_log_msg, "Request maximum packet length update=%d: rx=%d bytes, %d us, tx=%d bytes, %d us",
+		log_level(LOG_INFO, "Request maximum packet length update=%d: rx=%d bytes, %d us, tx=%d bytes, %d us",
 			err_code,
 			m_data_length.max_rx_octets, m_data_length.max_rx_time_us,
 			m_data_length.max_tx_octets, m_data_length.max_tx_time_us);
-		log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
-		sprintf_s(m_log_msg, "Request maximum packet length limit: rx=%d bytes, tx=%d bytes, %d us",
+		log_level(LOG_INFO, "Request maximum packet length limit: rx=%d bytes, tx=%d bytes, %d us",
 			m_data_limit.rx_payload_limited_octets,
 			m_data_limit.tx_payload_limited_octets, m_data_limit.tx_rx_time_limited_us);
-		log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
 	}break;
 
 	case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
 	{
-		sprintf_s(m_log_msg, "PHY update request.");
-		log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+		log_level(LOG_INFO, "PHY update request.");
 		ble_gap_phys_t const phys =
 		{
 			BLE_GAP_PHY_AUTO, /*tx_phys*/
@@ -2265,16 +2313,14 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		err_code = sd_ble_gap_phy_update(m_adapter, m_connection_handle, &phys);
 		if (err_code != NRF_SUCCESS)
 		{
-			sprintf_s(m_log_msg, "PHY update request reply failed, err_code %d", err_code);
-			log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+			log_level(LOG_ERROR, "PHY update request reply failed, err_code %d", err_code);
 		}
 	} break;
 
 #endif
 
 	default:
-		sprintf_s(m_log_msg, "Received an un-handled event with ID: %d", p_ble_evt->header.evt_id);
-		log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+		log_level(LOG_INFO, "Received an un-handled event with ID: %d", p_ble_evt->header.evt_id);
 		break;
 	}
 }
@@ -2316,12 +2362,10 @@ static uint32_t ble_stack_init()
 	case NRF_SUCCESS:
 		break;
 	case NRF_ERROR_INVALID_STATE:
-		sprintf_s(m_log_msg, "BLE stack already enabled");
-		log_handler(m_adapter, SD_RPC_LOG_WARNING, m_log_msg);
+		log_level(LOG_WARNING, "BLE stack already enabled");
 		break;
 	default:
-		sprintf_s(m_log_msg, "Failed to enable BLE stack. Error code: %d", err_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "Failed to enable BLE stack. Error code: %d", err_code);
 		break;
 	}
 
@@ -2368,16 +2412,14 @@ static uint32_t ble_cfg_set(uint8_t conn_cfg_tag)
 #if NRF_SD_BLE_API >= 6
 	ble_cfg.gap_cfg.role_count_cfg.adv_set_count = BLE_GAP_ADV_SET_COUNT_DEFAULT;
 #endif
-	ble_cfg.gap_cfg.role_count_cfg.periph_role_count = BLE_GAP_ROLE_COUNT_PERIPH_DEFAULT;
-	ble_cfg.gap_cfg.role_count_cfg.central_role_count = BLE_GAP_ROLE_COUNT_CENTRAL_DEFAULT;
-	/*NOTICE: set for sd_ble_gap_authenticate*/
-	ble_cfg.gap_cfg.role_count_cfg.central_sec_count = BLE_GAP_ROLE_COUNT_CENTRAL_SEC_DEFAULT;
+	ble_cfg.gap_cfg.role_count_cfg.periph_role_count = 0;
+	ble_cfg.gap_cfg.role_count_cfg.central_role_count = 1;
+	ble_cfg.gap_cfg.role_count_cfg.central_sec_count = 1;; /*NOTICE: set for sd_ble_gap_authenticate*/
 
 	error_code = sd_ble_cfg_set(m_adapter, BLE_GAP_CFG_ROLE_COUNT, &ble_cfg, ram_start);
 	if (error_code != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "sd_ble_cfg_set() failed when attempting to set BLE_GAP_CFG_ROLE_COUNT. Error code: 0x%02X", error_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "sd_ble_cfg_set() failed when attempting to set BLE_GAP_CFG_ROLE_COUNT. Error code: 0x%02X", error_code);
 		return error_code;
 	}
 
@@ -2393,8 +2435,7 @@ static uint32_t ble_cfg_set(uint8_t conn_cfg_tag)
 	error_code = sd_ble_cfg_set(m_adapter, BLE_CONN_CFG_GAP, &ble_cfg, ram_start);
 	if (error_code != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "sd_ble_cfg_set() failed when attempting to set BLE_CONN_CFG_GAP. Error code: 0x%02X", error_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "sd_ble_cfg_set() failed when attempting to set BLE_CONN_CFG_GAP. Error code: 0x%02X", error_code);
 		return error_code;
 	}
 #endif
@@ -2406,8 +2447,7 @@ static uint32_t ble_cfg_set(uint8_t conn_cfg_tag)
 	error_code = sd_ble_cfg_set(m_adapter, BLE_CONN_CFG_GATT, &ble_cfg, ram_start);
 	if (error_code != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "sd_ble_cfg_set() failed when attempting to set BLE_CONN_CFG_GATT. Error code: 0x%02X", error_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "sd_ble_cfg_set() failed when attempting to set BLE_CONN_CFG_GATT. Error code: 0x%02X", error_code);
 		return error_code;
 	}
 
@@ -2415,8 +2455,7 @@ static uint32_t ble_cfg_set(uint8_t conn_cfg_tag)
 	error_code = sd_ble_cfg_set(m_adapter, BLE_CONN_CFG_GATTC, &ble_cfg, ram_start);
 	if (error_code != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "sd_ble_cfg_set() failed when attempting to set BLE_CONN_CFG_GATTC. Error code: 0x%02X", error_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "sd_ble_cfg_set() failed when attempting to set BLE_CONN_CFG_GATTC. Error code: 0x%02X", error_code);
 		return error_code;
 	}
 
@@ -2424,8 +2463,7 @@ static uint32_t ble_cfg_set(uint8_t conn_cfg_tag)
 	error_code = sd_ble_cfg_set(m_adapter, BLE_CONN_CFG_GATTS, &ble_cfg, ram_start);
 	if (error_code != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "sd_ble_cfg_set() failed when attempting to set BLE_CONN_CFG_GATTS. Error code: 0x%02X", error_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "sd_ble_cfg_set() failed when attempting to set BLE_CONN_CFG_GATTS. Error code: 0x%02X", error_code);
 		return error_code;
 	}
 
@@ -2437,8 +2475,7 @@ static uint32_t ble_cfg_set(uint8_t conn_cfg_tag)
 	error_code = sd_ble_cfg_set(m_adapter, BLE_CONN_CFG_L2CAP, &ble_cfg, ram_start);
 	if (error_code != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "sd_ble_cfg_set() failed when attempting to set BLE_CONN_CFG_L2CAP. Error code: 0x%02X", error_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "sd_ble_cfg_set() failed when attempting to set BLE_CONN_CFG_L2CAP. Error code: 0x%02X", error_code);
 		return error_code;
 	}
 
@@ -2489,14 +2526,12 @@ uint32_t dongle_init(char* serial_port, uint32_t baud_rate)
 	ecc_res = ecc_p256_compute_pubkey(m_private_key, test_pubkey);
 	// validate pubkey
 	ecc_res = ecc_p256_valid_public_key(test_pubkey);
-	sprintf_s(m_log_msg, "uECC check key pair: %d should be 1", ecc_res);
-	log_level(LOG_DEBUG, m_log_msg);
+	log_level(LOG_DEBUG, "uECC check key pair: %d should be 1", ecc_res);
 
 	uint32_t error_code;
 	uint8_t  cccd_value = 0;
 	
-	sprintf_s(m_log_msg, "Serial port used: %s Baud rate used: %d", serial_port, baud_rate);
-	log_level(LOG_DEBUG, m_log_msg);
+	log_level(LOG_DEBUG, "Serial port used: %s Baud rate used: %d", serial_port, baud_rate);
 
 	m_adapter = adapter_init(serial_port, baud_rate);
 #ifdef _DEBUG
@@ -2508,8 +2543,7 @@ uint32_t dongle_init(char* serial_port, uint32_t baud_rate)
 
 	if (error_code != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "Failed to open nRF BLE Driver. Error code: 0x%02X", error_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "Failed to open nRF BLE Driver. Error code: 0x%02X", error_code);
 		return error_code;
 	}
 
@@ -2521,8 +2555,7 @@ uint32_t dongle_init(char* serial_port, uint32_t baud_rate)
 
 	if (error_code != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "Failed to init BLE stack. Error code: 0x%02X", error_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "Failed to init BLE stack. Error code: 0x%02X", error_code);
 		return error_code;
 	}
 
@@ -2541,13 +2574,11 @@ uint32_t dongle_init(char* serial_port, uint32_t baud_rate)
 	error_code = sd_ble_version_get(m_adapter, &ver);
 	if (error_code != NRF_SUCCESS)
 	{
-		sprintf_s(m_log_msg, "Failed to get connectivity FW versions. Error code: 0x%02X", error_code);
-		log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
+		log_level(LOG_ERROR, "Failed to get connectivity FW versions. Error code: 0x%02X", error_code);
 		return error_code;
 	}
 	else {
-		sprintf_s(m_log_msg, "Connectivity FW Version: %d, Company: %d, SubVersion: %d", ver.version_number, ver.company_id, ver.subversion_number);
-		log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
+		log_level(LOG_INFO, "Connectivity FW Version: %d, Company: %d, SubVersion: %d", ver.version_number, ver.company_id, ver.subversion_number);
 	}
 
 	return error_code;

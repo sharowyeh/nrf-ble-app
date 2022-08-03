@@ -90,6 +90,8 @@ void on_dev_discovered(const char* addr_str, const char* name, uint8_t addr_type
 	for (auto it = device_items.begin(); it != device_items.end(); it++) {
 		if (std::string(addr_str).compare(it->addr_str) == 0) {
 			it->rssi = rssi;
+			if (std::string(name).empty() == false)
+				it->name = std::string(name);
 			sprintf_s((char*)it->label, 128, "%s %s %d", addr_str, name, rssi);
 			exists = true;
 			break;
