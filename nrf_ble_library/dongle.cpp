@@ -35,8 +35,8 @@ typedef struct _addr_t
 /* see also ble_data_t but fixed data memory allocation for ease of init */
 typedef struct _data_t
 {
-	uint8_t  *p_data;   /**< Pointer to data. */
-	uint16_t data_len; /**< Length of data. */
+	uint8_t  p_data[DATA_BUFFER_SIZE] = { 0 };   /**< Pointer to data. */
+	uint16_t len; /**< Length of data. */
 } data_t;
 
 enum _uint_ms
@@ -355,47 +355,44 @@ static uint32_t convert_byte_string(char* byte_array, uint32_t len, char* str);
 /* func duplicated from adv_report_parse splitted advertising data by each types */
 static uint32_t adv_report_data_slice(const ble_gap_evt_adv_report_t* p_adv_report, std::map<uint8_t, data_t>* pp_type_data)
 {
-	data_t   adv_data;
+	ble_data_t   adv_data;
 
 	// Initialize advertisement report for parsing
 #if NRF_SD_BLE_API >= 6
 	adv_data.p_data = (uint8_t*)p_adv_report->data.p_data;
-	adv_data.data_len = p_adv_report->data.len;
+	adv_data.len = p_adv_report->data.len;
 #else
 	adv_data.p_data = (uint8_t*)p_adv_report->data;
-	adv_data.data_len = p_adv_report->dlen;
+	adv_data.len = p_adv_report->dlen;
 #endif
 
-	uint32_t  index = 0;
-	uint8_t* p_data;
-
 	char log_data[256] = { 0 };
-	convert_byte_string((char*)adv_data.p_data, adv_data.data_len, log_data);
+	convert_byte_string((char*)adv_data.p_data, adv_data.len, log_data);
 	log_level(LOG_TRACE, "Raw adv: %s", log_data);
 
-	p_data = adv_data.p_data;
+	uint32_t  index = 0;
+	uint8_t* p_data = adv_data.p_data;
+	uint16_t len = adv_data.len;
 	
 	// advertising data format:
 	// https://docs.silabs.com/bluetooth/4.0/general/adv-and-scanning/bluetooth-adv-data-basics
 	// assigned numbers, for AD type
 	// https://btprodspecificationrefs.blob.core.windows.net/assigned-numbers/Assigned%20Number%20Types/Generic%20Access%20Profile.pdf
 
-	while (index < adv_data.data_len)
+	while (index < len)
 	{
-		uint8_t field_length = p_data[index];
+		uint8_t field_len = p_data[index];
 		uint8_t field_type = p_data[index + 1];
 
-		//data_t* field_data;
-		auto field_data = pp_type_data[field_type];
+		auto field_data = (*pp_type_data)[field_type];
+		field_data.len = field_len - 1;
+		memset(field_data.p_data, 0, DATA_BUFFER_SIZE);
+		memcpy(field_data.p_data, &p_data[index + 2], field_data.len);
 
-		data_t type_data = {
-			&p_data[index + 2],
-			field_length - 1
-		};
-		pp_type_data->insert_or_assign(field_type, type_data);
-		/*sprintf_s(m_log_msg, " type:%x datalen:%d", field_type, field_length);
-		log_level(LOG_DEBUG, m_log_msg);*/
-		index += field_length + 1;
+		pp_type_data->insert_or_assign(field_type, field_data);		
+		log_level(LOG_TRACE, " type:%x datalen:%d", field_type, field_len);
+
+		index += field_len + 1;
 	}
 	return NRF_SUCCESS;
 }
@@ -405,13 +402,13 @@ static bool get_adv_name(std::map<uint8_t, data_t>* pp_type_data, char* name)
 {
 	auto found = pp_type_data->find(BLE_GAP_AD_TYPE_COMPLETE_LOCAL_NAME);
 	if (found != pp_type_data->end()) {
-		memcpy(name, found->second.p_data, found->second.data_len);
+		memcpy(name, found->second.p_data, found->second.len);
 		return true;
 	}
 
 	found = pp_type_data->find(BLE_GAP_AD_TYPE_SHORT_LOCAL_NAME);
 	if (found != pp_type_data->end()) {
-		memcpy(name, found->second.p_data, found->second.data_len);
+		memcpy(name, found->second.p_data, found->second.len);
 		return true;
 	}
 
@@ -430,14 +427,14 @@ static bool get_adv_name(std::map<uint8_t, data_t>* pp_type_data, char* name)
  * @retval NRF_SUCCESS if the data type is found in the report.
  * @retval NRF_ERROR_NOT_FOUND if the data type could not be found.
  */
-static uint32_t adv_report_parse(uint8_t type, data_t * p_advdata, data_t * p_typedata)
+static uint32_t adv_report_parse(uint8_t type, ble_data_t * p_advdata, ble_data_t* p_typedata)
 {
 	uint32_t  index = 0;
 	uint8_t * p_data;
 
 	p_data = p_advdata->p_data;
 
-	while (index < p_advdata->data_len)
+	while (index < p_advdata->len)
 	{
 		uint8_t field_length = p_data[index];
 		uint8_t field_type = p_data[index + 1];
@@ -445,7 +442,7 @@ static uint32_t adv_report_parse(uint8_t type, data_t * p_advdata, data_t * p_ty
 		if (field_type == type)
 		{
 			p_typedata->p_data = &p_data[index + 2];
-			p_typedata->data_len = field_length - 1;
+			p_typedata->len = field_length - 1;
 			return NRF_SUCCESS;
 		}
 		index += field_length + 1;
@@ -457,8 +454,8 @@ static uint32_t adv_report_parse(uint8_t type, data_t * p_advdata, data_t * p_ty
 static bool get_adv_name(const ble_gap_evt_adv_report_t *p_adv_report, char * name)
 {
 	uint32_t err_code;
-	data_t   adv_data;
-	data_t   dev_name;
+	ble_data_t   adv_data;
+	ble_data_t   dev_name;
 
 	// Initialize advertisement report for parsing
 #if NRF_SD_BLE_API >= 6
@@ -466,7 +463,7 @@ static bool get_adv_name(const ble_gap_evt_adv_report_t *p_adv_report, char * na
 	adv_data.data_len = p_adv_report->data.len;
 #else
 	adv_data.p_data = (uint8_t *)p_adv_report->data;
-	adv_data.data_len = p_adv_report->dlen;
+	adv_data.len = p_adv_report->dlen;
 #endif
 
 	//search for advertising names
@@ -475,7 +472,7 @@ static bool get_adv_name(const ble_gap_evt_adv_report_t *p_adv_report, char * na
 		&dev_name);
 	if (err_code == NRF_SUCCESS)
 	{
-		memcpy(name, dev_name.p_data, dev_name.data_len);
+		memcpy(name, dev_name.p_data, dev_name.len);
 		return true;
 	}
 
@@ -485,7 +482,7 @@ static bool get_adv_name(const ble_gap_evt_adv_report_t *p_adv_report, char * na
 		&dev_name);
 	if (err_code == NRF_SUCCESS)
 	{
-		memcpy(name, dev_name.p_data, dev_name.data_len);
+		memcpy(name, dev_name.p_data, dev_name.len);
 		return true;
 	}
 
@@ -1176,12 +1173,13 @@ uint32_t data_read(uint16_t handle, uint8_t *data, uint16_t *len, uint16_t timeo
 		return NRF_ERROR_TIMEOUT;
 	}
 
-	if (m_read_data[handle].p_data == NULL || m_read_data[handle].data_len == 0)
+	if (m_read_data[handle].p_data == NULL || m_read_data[handle].len == 0)
 		return NRF_ERROR_INVALID_DATA;
-
-	memcpy_s(data, *len, m_read_data[handle].p_data, m_read_data[handle].data_len);
-	*len = std::min(*len, m_read_data[handle].data_len);
-
+	
+	// limited data length by given len
+	*len = std::min(*len, m_read_data[handle].len);
+	memcpy_s(data, *len, m_read_data[handle].p_data, *len);
+	
 	return NRF_SUCCESS;
 }
 
@@ -1213,15 +1211,13 @@ EXTERNC NRFBLEAPI uint32_t data_write_async(uint16_t handle, uint8_t* data, uint
 	if (data == NULL || len == 0)
 		return NRF_ERROR_INVALID_PARAM;
 
-	if (m_write_data[handle].data_len == 0)
-		m_write_data[handle].p_data = (uint8_t*)calloc(DATA_BUFFER_SIZE, sizeof(uint8_t));
-
+	memset(m_write_data[handle].p_data, 0, DATA_BUFFER_SIZE);
 	memcpy_s(m_write_data[handle].p_data, DATA_BUFFER_SIZE, data, len);
-	m_write_data[handle].data_len = len;
+	m_write_data[handle].len = len;
 
 	ble_gattc_write_params_t write_params;
 	write_params.handle = handle;
-	write_params.len = m_write_data[handle].data_len;
+	write_params.len = m_write_data[handle].len;
 	write_params.p_value = m_write_data[handle].p_data;
 	write_params.write_op = BLE_GATT_OP_WRITE_REQ;
 	write_params.offset = 0;
@@ -1601,10 +1597,9 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
 		dev_char.handle_range.end_handle = m_service_end_handle;
 		m_char_list.push_back(dev_char);
 
-		// pre-allocate for read data, reduce effort on_hvx
 		auto handle_value = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value;
-		if (m_read_data[handle_value].p_data == nullptr)
-			m_read_data[handle_value].p_data = (uint8_t*)calloc(DATA_BUFFER_SIZE, sizeof(uint8_t));
+		// std::map operator[] will create pair if key not exists, and fixed data_t.p_data allocation
+		memset(m_read_data[handle_value].p_data, 0, DATA_BUFFER_SIZE);
 	}
 	
 	// NOTICE: m_char_idx increases in on_descriptor_discovery_response
@@ -1785,17 +1780,14 @@ static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 	uint16_t offset = p_ble_gattc_evt->params.read_rsp.offset;
 	uint16_t len = p_ble_gattc_evt->params.read_rsp.len;
 
-	//char read_bytes[DATA_BUFFER_SIZE] = { 0 };
-	//memcpy_s(&read_bytes[0], DATA_BUFFER_SIZE, p_data + offset, len);
 	sprintf_s(m_log_msg, "Received read response handle:0x%04X len:%d data: ", rsp_handle, len);
 	convert_byte_string((char *)p_data, len, &(m_log_msg[strlen(m_log_msg)]));
 	log_level(LOG_DEBUG, m_log_msg);
 
 	// NOTICE: refer to on_characteristic_discovery_response has pre-allocated memory
-	if (m_read_data[rsp_handle].p_data == nullptr)
-		m_read_data[rsp_handle].p_data = (uint8_t*)calloc(DATA_BUFFER_SIZE, sizeof(uint8_t));
+	memset(m_read_data[rsp_handle].p_data, 0, DATA_BUFFER_SIZE);
 	memcpy_s(m_read_data[rsp_handle].p_data, DATA_BUFFER_SIZE, p_data + offset, len);
-	m_read_data[rsp_handle].data_len = len;
+	m_read_data[rsp_handle].len = len;
 	// release lock for data_read()
 	m_cond_read_write.notify_all();
 
@@ -1835,10 +1827,9 @@ static void on_write_response(const ble_gattc_evt_t * const p_ble_gattc_evt)
 	log_level(LOG_DEBUG, "Sent write response handle:0x%04X len:%d data: ...", rsp_handle, len);
 
 	// NOTICE: refer to on_characteristic_discovery_response has pre-allocated memory
-	if (m_write_data[rsp_handle].p_data == nullptr)
-		m_write_data[rsp_handle].p_data = (uint8_t*)calloc(DATA_BUFFER_SIZE, sizeof(uint8_t));
+	memset(m_write_data[rsp_handle].p_data, 0, DATA_BUFFER_SIZE);
 	memcpy_s(m_write_data[rsp_handle].p_data, DATA_BUFFER_SIZE, p_data + offset, len);
-	m_write_data[rsp_handle].data_len = len;
+	m_write_data[rsp_handle].len = len;
 	// release lock for data_write()
 	m_cond_read_write.notify_all();
 
@@ -1894,13 +1885,12 @@ static void on_hvx(const ble_gattc_evt_t * const p_ble_gattc_evt)
 	log_level(LOG_DEBUG, m_log_msg);
 
 	// NOTICE: refer to on_characteristic_discovery_response has pre-allocated memory
-	if (m_read_data[hvx_handle].p_data == nullptr)
-		m_read_data[hvx_handle].p_data = (uint8_t*)calloc(DATA_BUFFER_SIZE, sizeof(uint8_t));
+	memset(m_read_data[hvx_handle].p_data, 0, DATA_BUFFER_SIZE);
 	memcpy_s(m_read_data[hvx_handle].p_data, DATA_BUFFER_SIZE, p_data, len);
-	m_read_data[hvx_handle].data_len = len;
+	m_read_data[hvx_handle].len = len;
 
 	for (auto &fn : m_callback_fn_list[FN_ON_DATA_RECEIVED]) {
-		((fn_on_data_received)fn)(hvx_handle, m_read_data[hvx_handle].p_data, m_read_data[hvx_handle].data_len);
+		((fn_on_data_received)fn)(hvx_handle, m_read_data[hvx_handle].p_data, m_read_data[hvx_handle].len);
 	}
 }
 
