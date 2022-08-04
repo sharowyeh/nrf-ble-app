@@ -307,6 +307,15 @@ static void draw_init_layout() {
 	if (ImGui::Button("Reset")) {
 		dongle_disconnect();
 		dongle_reset();
+		// cleanup device and ready to update UI dataset
+		device_items.clear();
+		device_selected = -1;
+		device_item = "";
+
+		// cleanup report and ready to update UI dataset
+		report_item = NULL;
+		report_selected = -1;
+		report_items.clear();
 		init_state = ACT_STATES::NONE;
 	}
 
@@ -402,6 +411,8 @@ static void draw_conn_layout() {
 			show_msg_window = true;
 		}
 		else {
+			if (scan_state == ACT_STATES::RUNNING)
+				scan_state = ACT_STATES::NONE;
 			auto ble_code = conn_start(
 				device_items[device_selected].addr_type,
 				device_items[device_selected].addr);
