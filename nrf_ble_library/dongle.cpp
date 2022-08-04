@@ -2142,8 +2142,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		log_level(LOG_DEBUG, m_log_msg);
 		// valid peer pubkey
 		int ecc_res = ecc_p256_valid_public_key(p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.p_pk_peer->pk);
-		sprintf_s(m_log_msg, " peer_pk valid=%d should be 1", ecc_res);
-		log_level(LOG_DEBUG, m_log_msg);
+		log_level(LOG_DEBUG, " peer_pk valid=%d should be 1", ecc_res);
 
 		// compute share secret from peer pk
 		ble_gap_lesc_dhkey_t dhkey = { 0 };
@@ -2154,25 +2153,24 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 
 		// sd_ble_gap_lesc_dhkey_reply: reply shared
 		err_code = sd_ble_gap_lesc_dhkey_reply(m_adapter, m_connection_handle, &dhkey);
-		sprintf_s(m_log_msg, " reply dhkey: %d", err_code);
-		log_level(LOG_DEBUG, m_log_msg);
+		log_level(LOG_DEBUG, " reply dhkey: %d", err_code);
 		
 		// sd_ble_gap_lesc_oob_data_get: get own oob
 		ble_gap_lesc_p256_pk_t pk_own = { 0 };
 		memcpy_s(pk_own.pk, ECC_P256_PK_LEN, m_public_key, ECC_P256_PK_LEN);
 		ble_gap_lesc_oob_data_t oob_own = { 0 };
 		err_code = sd_ble_gap_lesc_oob_data_get(m_adapter, m_connection_handle, &pk_own, &oob_own);
-		sprintf_s(m_log_msg, " oob_get: %d", err_code);
-		log_level(LOG_DEBUG, m_log_msg);
+		log_level(LOG_TRACE, " oob_get: %d", err_code);
+
 		sprintf_s(m_log_msg, "  pk_own= ");
 		convert_byte_string((char*)pk_own.pk, BLE_GAP_LESC_P256_PK_LEN, &m_log_msg[strlen(m_log_msg)]);
-		log_level(LOG_DEBUG, m_log_msg);
+		log_level(LOG_TRACE, m_log_msg);
 		sprintf_s(m_log_msg, "  oob_own.random= ");
 		convert_byte_string((char*)oob_own.r, BLE_GAP_SEC_KEY_LEN, &m_log_msg[strlen(m_log_msg)]);
-		log_level(LOG_DEBUG, m_log_msg);
+		log_level(LOG_TRACE, m_log_msg);
 		sprintf_s(m_log_msg, "  oob_own.confirm= ");
 		convert_byte_string((char*)oob_own.c, BLE_GAP_SEC_KEY_LEN, &m_log_msg[strlen(m_log_msg)]);
-		log_level(LOG_DEBUG, m_log_msg);
+		log_level(LOG_TRACE, m_log_msg);
 
 		if (p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.oobd_req == 0)
 			break;
@@ -2180,8 +2178,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		// sd_ble_gap_lesc_oob_data_set: set own oob, peer oob
 		ble_gap_lesc_oob_data_t oob_peer = { 0 }; // TODO: input required
 		err_code = sd_ble_gap_lesc_oob_data_set(m_adapter, m_connection_handle, &oob_own, &oob_peer);
-		sprintf_s(m_log_msg, " oob_set: %d", err_code);
-		log_level(LOG_DEBUG, m_log_msg);
+		log_level(LOG_DEBUG, " oob_set: %d", err_code);
 	}break;
 
 	case BLE_GAP_EVT_AUTH_KEY_REQUEST:
