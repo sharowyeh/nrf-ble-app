@@ -1,0 +1,1 @@
+refer to https://github.com/NordicSemiconductor/pc-ble-driver/tree/master/examples
