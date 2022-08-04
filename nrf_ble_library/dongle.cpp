@@ -4,10 +4,18 @@
 //macro refer to https://docs.microsoft.com/en-us/cpp/preprocessor/predefined-macros?view=msvc-160
 #if defined(_DLL) && !defined(_DEBUG)
 // NOTICE: nordic offical static lib only support /MD
+#if NRF_SD_BLE_API >= 6
+#pragma comment(lib, "nrf-ble-driver-sd_api_v6-mt-static-4_1_4.lib")
+#else
 #pragma comment(lib, "nrf-ble-driver-sd_api_v5-mt-static-4_1_2.lib")
+#endif
 #else
 // NOTICE: required nrf-ble-driver-sd_api_v5-mt-4_1_2.dll at output directory
+#if NRF_SD_BLE_API >= 6
+#pragma comment(lib, "nrf-ble-driver-sd_api_v6-mt-4_1_4.lib")
+#else
 #pragma comment(lib, "nrf-ble-driver-sd_api_v5-mt-4_1_2.lib")
+#endif
 #endif
 #include "sd_rpc.h"
 #include "security.h"
@@ -460,7 +468,7 @@ static bool get_adv_name(const ble_gap_evt_adv_report_t *p_adv_report, char * na
 	// Initialize advertisement report for parsing
 #if NRF_SD_BLE_API >= 6
 	adv_data.p_data = (uint8_t *)p_adv_report->data.p_data;
-	adv_data.data_len = p_adv_report->data.len;
+	adv_data.len = p_adv_report->data.len;
 #else
 	adv_data.p_data = (uint8_t *)p_adv_report->data;
 	adv_data.len = p_adv_report->dlen;
@@ -720,11 +728,11 @@ uint32_t conn_start(uint8_t addr_type, uint8_t addr[6])
 	return err_code;
 }
 
-uint32_t auth_config(bool lesc, bool oob, bool mitm)
+uint32_t auth_set_params(bool lesc, bool oob, bool mitm, uint8_t role, bool enc, bool id, bool sign, bool link)
 {
-	m_sec_params.lesc = 1; /* enable LE secure conn */
-	m_sec_params.oob = 0; /* set if has out of band auth data */
-	m_sec_params.mitm = 0;
+	m_sec_params.lesc = lesc ? 1 : 0; /* enable LE secure conn */
+	m_sec_params.oob = oob ? 1 : 0; /* set if has out of band auth data */
+	m_sec_params.mitm = mitm ? 1 : 0;
 	/* OOB enabled will use OOB method if:
 	- both of devices have out of band(legacy), or
 	- at least one of device has peer OOB data(lesc enabled) */
@@ -735,13 +743,18 @@ uint32_t auth_config(bool lesc, bool oob, bool mitm)
 	ble_gap_enc_info_t info = { 0 };
 	sd_ble_gap_encrypt(m_adapter, m_connection_handle, NULL, NULL);*/
 	//TODO: debug2 req peer enc
-	m_sec_params.kdist_own.enc = 1;
-	m_sec_params.kdist_own.id = 1;
-	m_sec_params.kdist_own.sign = 0; // 1:NRF_ERROR_NOT_SUPPORTED
-	m_sec_params.kdist_own.link = 0; // 1:NRF_ERROR_NOT_SUPPORTED
-	m_sec_params.kdist_peer.enc = 1;
-	m_sec_params.kdist_peer.id = 1;
-
+	if (role == 0) {
+		m_sec_params.kdist_own.enc = enc ? 1 : 0;
+		m_sec_params.kdist_own.id = id ? 1 : 0;
+		m_sec_params.kdist_own.sign = sign ? 1 : 0; // 1:NRF_ERROR_NOT_SUPPORTED
+		m_sec_params.kdist_own.link = link ? 1 : 0; // 1:NRF_ERROR_NOT_SUPPORTED
+	}
+	if (role == 1) {
+		m_sec_params.kdist_peer.enc = enc ? 1 : 0;
+		m_sec_params.kdist_peer.id = id ? 1 : 0;
+		m_sec_params.kdist_peer.sign = sign ? 1 : 0; // 1:NRF_ERROR_NOT_SUPPORTED
+		m_sec_params.kdist_peer.link = link ? 1 : 0; // 1:NRF_ERROR_NOT_SUPPORTED
+	}
 	return NRF_SUCCESS;
 }
 
@@ -1326,30 +1339,31 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 	uint32_t err_code;
 	uint8_t  str[STRING_BUFFER_SIZE] = { 0 };
 
-	// ignore rssi less than -60
-	if (p_ble_gap_evt->params.adv_report.rssi < -60)
-		return;
+	// only focus on rssi less than -60
+	bool near = (p_ble_gap_evt->params.adv_report.rssi > -60);
 
 	uint64_t addr_num = 0;
-	ble_address_to_uint64_convert((uint8_t *)p_ble_gap_evt->params.adv_report.peer_addr.addr, &addr_num);
+	if (near) {
+		ble_address_to_uint64_convert((uint8_t*)p_ble_gap_evt->params.adv_report.peer_addr.addr, &addr_num);
 
-	// adv list always up-to-date
-	bool arrival = (m_adv_list.find(addr_num) == m_adv_list.end());
-	if (arrival) {
-		adv_data_t adv_data = {
-			p_ble_gap_evt->params.adv_report
-		};
-		m_adv_list.insert_or_assign(addr_num, adv_data);
-	}
-	//m_adv_list.insert_or_assign(addr_num, p_ble_gap_evt->params.adv_report);
+		// adv list always up-to-date
+		bool arrival = (m_adv_list.find(addr_num) == m_adv_list.end());
+		if (arrival) {
+			adv_data_t adv_data = {
+				p_ble_gap_evt->params.adv_report
+			};
+			m_adv_list.insert_or_assign(addr_num, adv_data);
+		}
+		//m_adv_list.insert_or_assign(addr_num, p_ble_gap_evt->params.adv_report);
 
-	adv_report_data_slice(&p_ble_gap_evt->params.adv_report, &m_adv_list[addr_num].type_data_list);
-	log_level(LOG_TRACE, "Scan addr:%llx parsed advertising data list:%lu", addr_num, m_adv_list[addr_num].type_data_list.size());
-
+		adv_report_data_slice(&p_ble_gap_evt->params.adv_report, &m_adv_list[addr_num].type_data_list);
+		log_level(LOG_TRACE, "Scan addr:%llx parsed advertising data list:%lu", addr_num, m_adv_list[addr_num].type_data_list.size());
+	} // end of if(near)
+	
 	// TODO: caller update if any or rssi changed?
-	//bool update = true;
-	bool update = m_adv_list[addr_num].adv_report.rssi != p_ble_gap_evt->params.adv_report.rssi;
-	if (update)
+	bool update = true;
+	//bool update = m_adv_list[addr_num].adv_report.rssi != p_ble_gap_evt->params.adv_report.rssi;
+	if (near && update)
 	{
 		// Log the Bluetooth device address of advertisement packet received.
 		ble_address_to_string_convert(p_ble_gap_evt->params.adv_report.peer_addr, str);
@@ -1362,11 +1376,12 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 #if NRF_SD_BLE_API >= 6
 		uint8_t  str2[STRING_BUFFER_SIZE] = { 0 };
 		ble_address_to_string_convert(p_ble_gap_evt->params.adv_report.direct_addr, str2);
-		log_level(LOG_DEBUG, "Received adv report peer:0x%s direct:0x%s name:%s\r\n \
-			rssi:%d type:%d chidx:%d dataid:%d priphy:%d setid:%d txpwr:%d auxoff:%d auxphy:%d",
-			str, str2, name,
+		log_level(LOG_DEBUG, "Received adv report peer:0x%s direct:0x%s rssi:%d type:%d name:%s\r\n \
+chidx:%d dataid:%d priphy:%d setid:%d txpwr:%d auxoff:%d auxphy:%d",
+			str, str2,
 			p_ble_gap_evt->params.adv_report.rssi,
 			p_ble_gap_evt->params.adv_report.type,
+			name,
 			p_ble_gap_evt->params.adv_report.ch_index,
 			p_ble_gap_evt->params.adv_report.data_id,
 			p_ble_gap_evt->params.adv_report.primary_phy,
@@ -1388,6 +1403,9 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 			return;
 		}
 #endif
+
+		// flag to invoke caller callback for further connection establish
+		// or waiting other advertising data (for SD API v6, re-start scan)
 		if (m_connection_is_in_progress) {
 			log_level(LOG_WARNING, "Connection has been started, ignore rest of discovered devices");
 			return;
@@ -1400,28 +1418,27 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 			addr_t report;
 			report.rssi = p_ble_gap_evt->params.adv_report.rssi;
 			report.addr_type = p_ble_gap_evt->params.adv_report.peer_addr.addr_type;
-			memcpy_s(&(report.addr[0]), BLE_GAP_ADDR_LEN, 
+			memcpy_s(&(report.addr[0]), BLE_GAP_ADDR_LEN,
 				&(p_ble_gap_evt->params.adv_report.peer_addr.addr[0]), BLE_GAP_ADDR_LEN);
-			for (auto &fn : m_callback_fn_list[FN_ON_DISCOVERED]) {
+			for (auto& fn : m_callback_fn_list[FN_ON_DISCOVERED]) {
 				((fn_on_discovered)fn)(addr_str.c_str(), name_str.c_str(), report.addr_type, report.addr, report.rssi);
 			}
 		}
-	}
+	} // end of if(update)
 
 #if NRF_SD_BLE_API >= 6
-	else {
-		err_code = sd_ble_gap_scan_start(m_adapter, NULL, &m_adv_report_buffer);
+	//TODO: may need manual stop flag prevent sending command to dongle at the same time
+	err_code = sd_ble_gap_scan_start(m_adapter, NULL, &m_adv_report_buffer);
 
-		if (err_code != NRF_SUCCESS)
-		{
-			sprintf_s(m_log_msg, "Scan re-start failed with error code: %d", err_code);
-			log_handler(m_adapter, SD_RPC_LOG_ERROR, m_log_msg);
-		}
-		else
-		{
-			sprintf_s(m_log_msg, "Scan re-started");
-			log_handler(m_adapter, SD_RPC_LOG_INFO, m_log_msg);
-		}
+	if (err_code != NRF_SUCCESS)
+	{
+		sprintf_s(m_log_msg, "Scan re-start failed with error code: %d", err_code);
+		log_level(LOG_ERROR, m_log_msg);
+	}
+	else
+	{
+		sprintf_s(m_log_msg, "Scan re-started");
+		log_level(LOG_DEBUG, m_log_msg);
 	}
 #endif
 
