@@ -9,6 +9,12 @@
 #include "dongle.h"
 
 #include <GLFW/glfw3.h>
+//for GLFW compiling runtime library config /MT[d] or /MD[d]
+#ifdef _DLL
+#pragma comment(lib, "glfw3.lib")
+#else
+#pragma comment(lib, "glfw3_mt.lib")
+#endif
 #ifdef _WIN32
 #undef APIENTRY
 #define GLFW_EXPOSE_NATIVE_WIN32
