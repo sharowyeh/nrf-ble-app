@@ -62,7 +62,7 @@ EXTERNC NRFBLEAPI uint32_t scan_start(float interval, float window, bool active,
 EXTERNC NRFBLEAPI uint32_t scan_stop();
 EXTERNC NRFBLEAPI uint32_t conn_start(uint8_t addr_type, uint8_t addr[6]);
 /*TODO:isolate ble secure func for further dev, params not fixed yet*/
-EXTERNC NRFBLEAPI uint32_t auth_config(bool lesc, bool oob, bool mitm);
+EXTERNC NRFBLEAPI uint32_t auth_set_params(bool lesc, bool oob, bool mitm, uint8_t role, bool enc, bool id, bool sign, bool link);
 /*io_caps:0x2(BLE_GAP_IO_CAPS_KEYBOARD_ONLY), 
 passkey:assign 6 digits string or given NULL will be default "123456"*/
 EXTERNC NRFBLEAPI uint32_t auth_start(bool bond, bool keypress, uint8_t io_caps, const char* passkey);
