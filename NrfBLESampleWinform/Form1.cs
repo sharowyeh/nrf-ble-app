@@ -133,8 +133,11 @@ namespace NrfBLESampleWinform
 
         private void ButtonWrite_Click(object sender, EventArgs e)
         {
-            if (connected == false || authenticated == false)
+            if (connected == false || authenticated == false || comboBoxReportChar.SelectedItem == null)
+            {
+                WriteLog("No device connected or report endpoint selected");
                 return;
+            }
 
             byte[] data;
             try
@@ -160,6 +163,7 @@ namespace NrfBLESampleWinform
                 };
                 result = NrfBLELibrary.DataWriteByReportRef(refs, data, (ushort)data.Length, 2000);
             }
+            // for previous csharp sample version only list endpoint handles
             else if (args.Length == 1)
             {
                 var handle = ushort.Parse(args[0], System.Globalization.NumberStyles.HexNumber);
@@ -171,8 +175,11 @@ namespace NrfBLESampleWinform
 
         private void ButtonRead_Click(object sender, EventArgs e)
         {
-            if (connected == false || authenticated == false)
+            if (connected == false || authenticated == false || comboBoxReportChar.SelectedItem == null)
+            {
+                WriteLog("No device connected or report endpoint selected");
                 return;
+            }
 
             byte[] data = new byte[NrfBLELibrary.DATA_BUFFER_SIZE];
             ushort len = NrfBLELibrary.DATA_BUFFER_SIZE;
@@ -187,17 +194,12 @@ namespace NrfBLESampleWinform
                 };
                 result = NrfBLELibrary.DataReadByReportRef(refs, data, ref len, 2000);
             }
+            // for previous csharp sample version only list endpoint handles
             else if (args.Length == 1)
             {
                 var handle = ushort.Parse(args[0], System.Globalization.NumberStyles.HexNumber);
                 result = NrfBLELibrary.DataRead(handle, data, ref len, 2000);
             }
-            else
-            {
-                // characteristic selected item error
-                return;
-            }
-
 
             var log = $"data read res:{result} data:";
             for (int i = 0; i < len; i++)
