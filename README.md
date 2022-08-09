@@ -8,18 +8,18 @@ Note for my unreliable memory:
 
 ### Environment requirement ###
 - nRF5xDK board(PCA10059) support SoftDevice s132 or later version, refer to [IC description](https://github.com/NordicSemiconductor/pc-ble-driver/tree/master#softdevice-and-ic) section on offical github site
-- Nordic connectivity firmware release binary [v4.1.4](https://github.com/NordicSemiconductor/pc-ble-driver/tree/v4.1.4-hex/hex/sd_api_v5) or v4.1.2 with api_v5, can be downloaded from offical github source file
-- pc-ble-driver development dependencies v4.1.2(or v4.1.4), can be downloaded from [pc-ble-driver/releases](https://github.com/NordicSemiconductor/pc-ble-driver/releases)
-This project references v4.1.2 header and lib files, but programmed v4.1.4 firmware to dev kit will get better data stacks performance, while receving continueous packets from peripheral device
+- Nordic connectivity firmware release binary [v4.1.4](https://github.com/NordicSemiconductor/pc-ble-driver/tree/v4.1.4-hex/hex/sd_api_v5) or further specific release branch
+- pc-ble-driver development dependencies v4.1.4, can be downloaded from [pc-ble-driver/releases](https://github.com/NordicSemiconductor/pc-ble-driver/releases)
+Recommeded v4.1.4 header and lib files to develop board programmed v4.1.4 connectivity firmware, for better data stacks performance while receving continueous packets from peripheral device. but also works with v4.1.2 version for backward compatible.
 
 
 ### Development dependencies ###
-Basically use x86_32 architecture for backward compatible, or follow the same steps for x86_64 architecture
-- Extract nrf-ble-driver-4.1.2-win_x86_32.zip to parent folder of this repo directory
+Basically use x86_32 architecture for platform compatible, or follow the same steps for x86_64 architecture
+- Extract nrf-ble-driver-4.1.4-win_x86_32.zip to parent folder of this repo directory
 - The path structure will be:
 ```
 ---/nrf-ble-app/...
- |-/nrf-ble-driver-4.1.2-win_x86_32/...
+ |-/nrf-ble-driver-4.1.4-win_x86_32/...
 ```
 - The c++ project properties will look up given folder for header and lib files automatically
 - (optional) For debug configuration, may pull nrf-ble-driver source code to parent folder of this repo directory
@@ -41,19 +41,23 @@ The next section contains FW programming steps by nRF Connect for Desktop
 
 
 ### Nordic connectivity firmware programming ###
-Recommendation is v4.1.4 which function verified for this repo
+Recommendation is v4.1.4 which function verified for this repo, it has 3 different ways to program firmware hex file to the board.
 
-Use Segger tool app(nrfjprog.exe) and dev kit driver(jlinkarm) from Nordic offical website, to program hex file to dev kit.
+- Method1: Use Segger tool app(nrfjprog.exe) and dev kit driver(jlinkarm) from Nordic offical website, to program hex file to dev kit.
 
-Also can simply install Nordic nRF Connect for Desktop and use bluethooth app to proceed connectivity firmware programming,
-refer steps as below:
-- Install nrfconnect-setup-3.8.0.exe
-- Download Bluetooth Low Energy app(offical, v3.0.0)
-- (offline alternative) Extract .nrfconnect-apps_3.8.0.zip to *<user_dir>*/.nrfconnect-apps/ 
-- Launch nRF Connect for Desktop, will show Bluetooth Low Energy(offical, v3.0.0) on apps list
-- Plug nRF5DK board(PCA10059) in USB port
-- Open Bluetooth Low Energy app than select device, it will ask the device must be programmed
-- Proceed firmware programming, log window will show up Nordic connectivity version and detailed information
+Also can simply install Nordic nRF Connect for Desktop:
+- Method2: Use programming app
+  - Install refconnect-setup from nordic offical website
+  - Download Programmer app from offical(or alternative offline extract .nrfconnect-apps.zip to *<user_dir>*/.nefconnect-apps/
+  - Launch nRF Connect for Desktop, Programmer app will show on apps list
+  - Plug nRF5DK board(PCA10059) into USB port
+  - Open Programmer app then select detected board device
+  - Add hex file for downloaded connectivity firmware hex(eg. connectivity_4.1.4_usb_with_s132_5.1.0.hex)
+  - Write and wait until programming finished
+- Method3: Use bluethooth app to proceed connectivity firmware programming, steps as below:
+  - Download Bluetooth Low Energy app from offical(or alternative offline extract .nrfconnect-apps.zip to *<user_dir>*/.nefconnect-apps/
+  - Open Bluetooth Low Energy app than select device, it will ask the device must be programmed
+  - Proceed firmware programming, log window will show up Nordic connectivity version and detailed information
 
 
 ### UI dependencies ###

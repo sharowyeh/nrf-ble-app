@@ -7,14 +7,14 @@
 #if NRF_SD_BLE_API >= 6
 #pragma comment(lib, "nrf-ble-driver-sd_api_v6-mt-static-4_1_4.lib")
 #else
-#pragma comment(lib, "nrf-ble-driver-sd_api_v5-mt-static-4_1_2.lib")
+#pragma comment(lib, "nrf-ble-driver-sd_api_v5-mt-static-4_1_4.lib")
 #endif
 #else
-// NOTICE: required nrf-ble-driver-sd_api_v5-mt-4_1_2.dll at output directory
+// NOTICE: required nrf-ble-driver-sd_api_v5-mt-4_1_4.dll at output directory
 #if NRF_SD_BLE_API >= 6
 #pragma comment(lib, "nrf-ble-driver-sd_api_v6-mt-4_1_4.lib")
 #else
-#pragma comment(lib, "nrf-ble-driver-sd_api_v5-mt-4_1_2.lib")
+#pragma comment(lib, "nrf-ble-driver-sd_api_v5-mt-4_1_4.lib")
 #endif
 #endif
 #include "sd_rpc.h"
