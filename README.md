@@ -7,8 +7,9 @@ Note for my unreliable memory:
 
 
 ### Environment requirement ###
-- nRF5xDK board(PCA10059) support SoftDevice s132 or later version, refer to [IC description](https://github.com/NordicSemiconductor/pc-ble-driver/tree/master#softdevice-and-ic) section on offical github site
-- Nordic connectivity firmware release binary [v4.1.4](https://github.com/NordicSemiconductor/pc-ble-driver/tree/v4.1.4-hex/hex/sd_api_v5) or further specific release branch
+- nRF52 dongle board(PCA10059) support SoftDevice s132 or later version, refer to [IC description](https://github.com/NordicSemiconductor/pc-ble-driver/tree/master#softdevice-and-ic) section on offical github site
+- This repo adopt SD API v6 with SoftDevice s140, connectivity firmware release can be downloaded from [v4.1.4](https://github.com/NordicSemiconductor/pc-ble-driver/tree/v4.1.4-hex/hex/)
+- To use SD API v5 and SoftDevice s132, refer to nrf_ble_library\nrf_ble_library-sd-api-v5.vcxproj
 - pc-ble-driver development dependencies v4.1.4, can be downloaded from [pc-ble-driver/releases](https://github.com/NordicSemiconductor/pc-ble-driver/releases)
 Recommeded v4.1.4 header and lib files to develop board programmed v4.1.4 connectivity firmware, for better data stacks performance while receving continueous packets from peripheral device. but also works with v4.1.2 version for backward compatible.
 
@@ -43,7 +44,8 @@ The next section contains FW programming steps by nRF Connect for Desktop
 ### Nordic connectivity firmware programming ###
 Recommendation is v4.1.4 which function verified for this repo, it has 3 different ways to program firmware hex file to the board.
 
-- Method1: Use Segger tool app(nrfjprog.exe) and dev kit driver(jlinkarm) from Nordic offical website, to program hex file to dev kit.
+- Method1: Use Segger tool app(nrfjprog.exe) and dev kit driver(jlinkarm) from Nordic offical website
+  - push dongle reset button to DFU mode, program hex file to dev kit by its default bootloader.
 
 Also can simply install Nordic nRF Connect for Desktop:
 - Method2: Use programming app
@@ -64,12 +66,15 @@ Also can simply install Nordic nRF Connect for Desktop:
 The C++ UI example app integrated GLFW via imgui
 
 - [imgui](https://github.com/ocornut/imgui) source code is fully copied to `imgui` folder in the project directory as including references.
-- Download [GLFW binaries](https://www.glfw.org/download.html) both x86 and x64 for windows environment, extract to the parent of solution directory
+<del>- Download [GLFW binaries](https://www.glfw.org/download.html) both x86 and x64 for windows environment, extract to the parent of solution directory</del>
+- This repo using GLFW v3.3.7 can simply download pre-compiled binaries from [offical github](https://github.com/glfw/glfw/releases/) for the specific version.
+  - The project refered to lib-vs2022 DLLs align to current compiler environment, also works by lib-vsw2019
 - The path structure will be:
 ```
 ---/nrf-ble-app/...
  |-/nrf-ble-app/nrf_ble_sample_glfw/imgui/...
  |-/glfw-3.3.7.bin.WIN32/...
+ |-/glfw-3.3.7.bin.WIN64/...
 ```
 
 ### BLE pairing refs ###
