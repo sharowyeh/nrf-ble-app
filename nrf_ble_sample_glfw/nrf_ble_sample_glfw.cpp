@@ -133,9 +133,15 @@ void on_dev_discovered(const char* addr_str, const char* name, uint8_t addr_type
 void on_dev_connected(uint8_t addr_type, uint8_t* addr)
 {
 	connected = true;
+	
+	printf("[main] auth set params with key dist\n");
+	// default disable oob and mitm options for target device compatible
+	auth_set_params(true, false, false, 0, true, true, false, false); // key dist for owner
+	auth_set_params(true, false, false, 1, true, true, false, false); // key dist for peer
+	
 	printf("[main] auth start\n");
 	// NOTICE: service discovery should wait before param updated event or bond for auth secure param(or passkey)
-		//         io_caps: use library default BLE_GAP_IO_CAPS_KEYBOARD_ONLY
+	//         io_caps: use library default BLE_GAP_IO_CAPS_KEYBOARD_ONLY
 	auth_start(true, false, 0x2, "654321");
 	// than
 	//service_discovery_start();

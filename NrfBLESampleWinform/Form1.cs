@@ -301,6 +301,12 @@ namespace NrfBLESampleWinform
         private void OnConnected(byte addrType, byte[] addr)
         {
             connected = true;
+            
+            WriteLog($"auth set params with key dist");
+            // default disable oob and mitm options for target device compatible
+            NrfBLELibrary.AuthSetParams(true, false, false, 0, true, true, false, false); // set key dist for owner
+            NrfBLELibrary.AuthSetParams(true, false, false, 1, true, true, false, false); // set key dist for peer
+            
             WriteLog($"connected, auth start");
             NrfBLELibrary.AuthStart(true, false, 0x2, "456789");
         }
