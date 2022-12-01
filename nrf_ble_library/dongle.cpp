@@ -69,10 +69,12 @@ enum _uint_ms
 #define BLE_UUID_BATTERY_SRV 0x180F
 #define BLE_UUID_HID_SRV 0x1812
 // characteristic, refer to SDK https://infocenter.nordicsemi.com/index.jsp?topic=%2Fcom.nordic.infocenter.s132.api.v2.0.0%2Fgroup__ble__types.html
+// <nrf-sdk>/componments/ble/common/ble_srv_common.h
 #define BLE_UUID_BATTERY_LEVEL_CHAR   0x2A19
 #define BLE_UUID_PROTOCOL_MODE_CHAR   0x2A4E
-#define BLE_UUID_REPORT_CHAR   0x2A4D
-#define BLE_UUID_REPORT_REF_DESCR 0x2908
+#define BLE_UUID_REPORT_MAP_CHAR      0X2A4B
+#define BLE_UUID_REPORT_CHAR          0x2A4D
+#define BLE_UUID_REPORT_REF_DESCR     0x2908
 
 #define BLE_UUID_CCCD                        0x2902
 #define BLE_CCCD_NOTIFY                      0x01
@@ -92,6 +94,7 @@ static uint8_t     m_connected_devices = 0; /* number of connected devices */
 static uint16_t    m_connection_handle = 0;
 static uint16_t    m_service_start_handle = 0;
 static uint16_t    m_service_end_handle = 0;
+static uint16_t    m_discovered_handle = 0;
 static uint16_t    m_device_name_handle = 0;
 static uint16_t    m_battery_level_handle = 0;
 static bool        m_connection_is_in_progress = false;
@@ -113,6 +116,7 @@ static std::map<uint64_t, adv_data_t> m_adv_list; /*addr, report*/
 typedef struct _dev_char_t {
 	uint16_t handle = 0; /* ble_gattc_char_t::handle_value */
 	uint16_t uuid = 0; /* ble_gattc_char_t::uuid */
+	uint16_t handle_decl = 0; /* ble_gattc_char_t::handle_decl */
 	ble_gattc_handle_range_t handle_range = { 0, 0 }; /* handle range of descs */
 	uint16_t report_ref_handle = 0; /* none zero which has BLE_UUID_REPORT_REF_DESCR desc */
 	uint8_t report_ref[32] = { 0 }; /* reference value of BLE_UUID_REPORT_REF_DESCR desc */
@@ -1556,6 +1560,8 @@ static void on_service_discovery_response(const ble_gattc_evt_t * const p_ble_ga
 
 	m_service_start_handle = service->handle_range.start_handle;
 	m_service_end_handle = service->handle_range.end_handle;
+	m_discovered_handle = service->handle_range.start_handle;
+	m_char_idx = m_char_list.size();
 
 	char_discovery_start(service->handle_range);
 }
@@ -1610,8 +1616,10 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
 		// NOTICE: only care the value handle for further usage
 		dev_char.handle = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value;
 		dev_char.uuid = p_ble_gattc_evt->params.char_disc_rsp.chars[i].uuid.uuid;
-		dev_char.handle_range.start_handle = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_decl;
+		dev_char.handle_decl = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_decl;
+		dev_char.handle_range.start_handle = dev_char.handle_decl;
 		dev_char.handle_range.end_handle = m_service_end_handle;
+		// TODO: should check item exists by handle?
 		m_char_list.push_back(dev_char);
 
 		auto handle_value = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_value;
@@ -1650,7 +1658,6 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 
 	log_level(LOG_INFO, " Received descriptor discovery response, descriptor count: %d", count);
 
-	uint16_t last_handle = 0;
 	char uuid_string[STRING_BUFFER_SIZE] = { 0 };
 	for (int i = 0; i < count; i++)
 	{
@@ -1661,21 +1668,38 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 			p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid,
 			uuid_string);
 
+		m_discovered_handle = 
+			std::max(m_service_start_handle, p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle);
+
+		// check characteristic index of m_char_list
+		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_CHARACTERISTIC)
+		{
+			auto decl = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
+			auto found = std::find_if(m_char_list.begin(), m_char_list.end(),
+				[decl](dev_char_t c) { return c.handle_decl == decl; });
+
+			m_char_idx = std::distance(m_char_list.begin(), found);
+			// leave count-loop to call char_discovery_start to build rest of characteristic items
+			if (m_char_idx >= m_char_list.size())
+				break;
+			log_level(LOG_INFO, " Manipulate characteristic list %d of %d", (m_char_idx + 1), m_char_list.size());
+		}
+
 		// store descriptor to list
 		ble_gattc_desc_t dev_desc = p_ble_gattc_evt->params.desc_disc_rsp.descs[i];
 		m_char_list[m_char_idx].desc_list.push_back(dev_desc);
 
-		//DEBUG: set cccd handle, refer to set_cccd_notification();
+		// set cccd handle, refer to set_cccd_notification();
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_CCCD)
 		{
 			m_char_list[m_char_idx].cccd_handle = dev_desc.handle;
-			log_level(LOG_DEBUG, " CCCD descriptor saved, handle=%x", dev_desc.handle);
+			log_level(LOG_DEBUG, " CCCD descriptor save to idx=%d, handle=%x", m_char_idx, dev_desc.handle);
 		}
-		//DEBUG: set report reference handle, refer to read_report_refs()
+		// set report reference handle, refer to read_report_refs()
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_REPORT_REF_DESCR)
 		{
 			m_char_list[m_char_idx].report_ref_handle = dev_desc.handle;
-			log_level(LOG_DEBUG, " Report reference descriptor saved, handle=%x", dev_desc.handle);
+			log_level(LOG_DEBUG, " Report reference descriptor save to idx=%d, handle=%x", m_char_idx, dev_desc.handle);
 		}
 
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_BATTERY_LEVEL_CHAR)
@@ -1694,26 +1718,18 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 			log_level(LOG_DEBUG, " Device name handle saved");
 		}
 
-		m_service_start_handle = std::max(m_service_start_handle, p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle);
 	}
 
-	if (++m_char_idx < m_char_list.size()) {
+	// TODO: may check all descrs are responsed? before move to the next char or back to discover char
+
+	if (m_char_idx < m_char_list.size() - 1) {
 		// move to find descriptors of the next characteristic
-		descr_discovery_start(m_char_list[m_char_idx].handle_range);
-	}
-	else if (last_handle < m_service_end_handle) {
-		// move to find rest of characteristics
-		ble_gattc_handle_range_t range{ m_service_start_handle, m_service_end_handle };
-		char_discovery_start(range);
+		descr_discovery_start(m_char_list[++m_char_idx].handle_range);
 	}
 	else {
-
-		m_cond_find.notify_all();
-
-		// invoke callback to caller when all characteristics discovered
-		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_DISCOVERED]) {
-			((fn_on_service_discovered)fn)(m_service_start_handle, m_char_list.size());
-		}
+		// move to find rest of characteristics
+		ble_gattc_handle_range_t range{ m_discovered_handle, m_service_end_handle };
+		char_discovery_start(range);
 	}
 
 }
