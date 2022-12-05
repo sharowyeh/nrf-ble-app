@@ -1,3 +1,20 @@
+### Goals & Requirements ###
+- Replancement for EOL hardware(nRF51 dongle)
+  - Targeting Nordic next-gen LTS BLE dongle product, nRF52840 dongle
+  - Nordic BLE connectivity firmware built from later version of nRF5 SDK
+  - Support SoftDevice s132 or later version for advertising extensions[(details)](https://www.nordicsemi.com/Products/Bluetooth-Low-Energy/nRF5-SDK-and-SoftDevice)
+- Generic software development support and maintenance plan
+  - Features duplicate from Nordic Master Control Panel(obsoleted)
+  - Library designed with C++ STL for Windows platform(optional:cross-platform)
+  - Support and maintain console app for function demonstration
+  - Support and maintain wrapper library in C# for Windows GUI sample
+  - Optional support C++ GUI app for cross-platform GUI sample
+
+
+### Overview ###
+TODO: graphical diagrams
+
+
 Controls nRF5xDK BLE connectivity FW to communicate with target BLE devices.
 
 The Nordic nRF Connect app is perfect, but I want to use it as fully tranditional windows desktop app
