@@ -70,11 +70,13 @@ enum _uint_ms
 #define BLE_UUID_HID_SRV 0x1812
 // characteristic, refer to SDK https://infocenter.nordicsemi.com/index.jsp?topic=%2Fcom.nordic.infocenter.s132.api.v2.0.0%2Fgroup__ble__types.html
 // <nrf-sdk>/componments/ble/common/ble_srv_common.h
-#define BLE_UUID_BATTERY_LEVEL_CHAR   0x2A19
-#define BLE_UUID_PROTOCOL_MODE_CHAR   0x2A4E
-#define BLE_UUID_REPORT_MAP_CHAR      0X2A4B
-#define BLE_UUID_REPORT_CHAR          0x2A4D
-#define BLE_UUID_REPORT_REF_DESCR     0x2908
+#define BLE_UUID_BATTERY_LEVEL_CHAR                              0x2A19     /**< Battery Level characteristic UUID. */
+#define BLE_UUID_REPORT_REF_DESCR                                0x2908     /**< Report Reference descriptor UUID. */
+#define BLE_UUID_HID_INFORMATION_CHAR                            0x2A4A     /**< Hid Information characteristic UUID. */
+#define BLE_UUID_REPORT_MAP_CHAR                                 0x2A4B     /**< Report Map characteristic UUID. */
+#define BLE_UUID_HID_CONTROL_POINT_CHAR                          0x2A4C     /**< Hid Control Point characteristic UUID. */
+#define BLE_UUID_REPORT_CHAR                                     0x2A4D     /**< Report characteristic UUID. */
+#define BLE_UUID_PROTOCOL_MODE_CHAR                              0x2A4E     /**< Protocol Mode characteristic UUID. */
 
 #define BLE_UUID_CCCD                        0x2902
 #define BLE_CCCD_NOTIFY                      0x01
@@ -597,6 +599,18 @@ static bool get_uuid_string(uint16_t uuid, char *uuid_string) {
 		break;
 	case BLE_UUID_REPORT_REF_DESCR:
 		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "ReportRef");
+		result = true;
+		break;
+	case BLE_UUID_HID_INFORMATION_CHAR:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "HidInfo");
+		result = true;
+		break;
+	case BLE_UUID_REPORT_MAP_CHAR:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "ReportMap");
+		result = true;
+		break;
+	case BLE_UUID_HID_CONTROL_POINT_CHAR:
+		strcpy_s(uuid_string, STRING_BUFFER_SIZE, "HidContrlPoint");
 		result = true;
 		break;
 	default:
@@ -1700,6 +1714,28 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 		{
 			m_char_list[m_char_idx].report_ref_handle = dev_desc.handle;
 			log_level(LOG_DEBUG, " Report reference descriptor save to idx=%d, handle=%x", m_char_idx, dev_desc.handle);
+		}
+		// handle represent HID protocol mode(nordic default PROTOCOL_MODE_BOOT 0x00, PROTOCOL_MODE_REPORT 0x01)
+		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_PROTOCOL_MODE_CHAR)
+		{
+			log_level(LOG_DEBUG, " Protocol mode handle=%x", dev_desc.handle);
+		}
+		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_REPORT_CHAR)
+		{
+			log_level(LOG_DEBUG, " Report handle=%x", dev_desc.handle);
+		}
+		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_HID_INFORMATION_CHAR)
+		{
+			log_level(LOG_DEBUG, " HID info handle=%x", dev_desc.handle);
+		}
+		// handle represent data for the HID descriptors
+		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_REPORT_MAP_CHAR)
+		{
+			log_level(LOG_DEBUG, " Report map handle=%x", dev_desc.handle);
+		}
+		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_HID_CONTROL_POINT_CHAR)
+		{
+			log_level(LOG_DEBUG, " HID control point handle=%x", dev_desc.handle);
 		}
 
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_BATTERY_LEVEL_CHAR)
