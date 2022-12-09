@@ -89,6 +89,7 @@ enum _uint_ms
 /** Global variables */
 static bool        m_dongle_initialized = false;
 static ble_gap_addr_t  m_connected_addr = { 0 }; /* intent or connected peripheral address */
+static bool        m_connection_is_in_progress = false; 
 static bool        m_is_connected = false; /* peripheral address has been connected(BLE_GAP_EVT_DISCONNECTED) */
 static char        m_passkey[6] = { '1', '2', '3', '4', '5', '6' }; /* default fixed passkey for auth request(BLE_GAP_EVT_AUTH_KEY_REQUEST) */
 static bool	       m_is_authenticated = false; /* peripheral address has been authenticated(BLE_GAP_EVT_AUTH_STATUS) */
@@ -99,7 +100,7 @@ static uint16_t    m_service_end_handle = 0;
 static uint16_t    m_discovered_handle = 0;
 static uint16_t    m_device_name_handle = 0;
 static uint16_t    m_battery_level_handle = 0;
-static bool        m_connection_is_in_progress = false;
+static bool        m_is_service_enabled = false;
 static adapter_t * m_adapter = NULL;
 
 /* Callback functions from caller */
@@ -625,11 +626,17 @@ static bool get_uuid_string(uint16_t uuid, char *uuid_string) {
 cleanup stored data for connected device
 */
 static void connection_cleanup() {
+	m_connection_handle = 0;
 	m_connected_addr = { 0 };
+	//m_connection_is_in_progress = false;
 	m_is_connected = false;
 	m_is_authenticated = false;
+	m_service_start_handle = 0;
+	m_service_end_handle = 0;
+	m_discovered_handle = 0;
 	m_device_name_handle = 0;
 	m_battery_level_handle = 0;
+	m_is_service_enabled = false;
 	m_char_list.clear();
 	m_char_idx = 0;
 	m_cond_read_write.notify_all();
@@ -966,6 +973,8 @@ static uint32_t set_cccd_notification(uint16_t handle)
 			}
 		}
 
+		m_is_service_enabled = true;
+
 		m_cond_find.notify_all();
 
 		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_ENABLED]) {
@@ -1198,9 +1207,11 @@ uint32_t data_read(uint16_t handle, uint8_t *data, uint16_t *len, uint16_t timeo
 		return error_code;
 	}
 
+	log_level(LOG_DEBUG, " Lock mutex wait for read response in %d ms", timeout);
 	//std::unique_lock<std::mutex> lck{ m_mtx_read_write };
 	auto stat = m_cond_read_write.wait_for(m_lck, std::chrono::milliseconds(timeout));
 	if (stat == std::cv_status::timeout) {
+		log_level(LOG_INFO, " Lock mutex wait for read response timeout");
 		return NRF_ERROR_TIMEOUT;
 	}
 
@@ -1269,9 +1280,11 @@ uint32_t data_write(uint16_t handle, uint8_t *data, uint16_t len, uint16_t timeo
 		return error_code;
 	}
 
+	log_level(LOG_DEBUG, " Lock mutex wait for write response in %d ms", timeout);
 	//std::unique_lock<std::mutex> lck{ m_mtx_read_write };
 	auto stat = m_cond_read_write.wait_for(m_lck, std::chrono::milliseconds(timeout));
 	if (stat == std::cv_status::timeout) {
+		log_level(LOG_INFO, " Lock mutex wait for write response timeout");
 		return NRF_ERROR_TIMEOUT;
 	}
 	//DEBUG: check write data?
@@ -1527,7 +1540,6 @@ static void on_disconnected(const ble_gap_evt_t *const p_ble_gap_evt) {
 		p_ble_gap_evt->params.disconnected.reason);
 
 	m_connected_devices--;
-	m_connection_handle = 0;
 	connection_cleanup();
 
 	for (auto &fn : m_callback_fn_list[FN_ON_DISCONNECTED]) {
@@ -1857,8 +1869,13 @@ static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 	memset(m_read_data[rsp_handle].p_data, 0, DATA_BUFFER_SIZE);
 	memcpy_s(m_read_data[rsp_handle].p_data, DATA_BUFFER_SIZE, p_data + offset, len);
 	m_read_data[rsp_handle].len = len;
+	log_level(LOG_DEBUG, " Raise condition to mutex for read response");
 	// release lock for data_read()
 	m_cond_read_write.notify_all();
+
+	// manipulate characteristic list only in service enabling stage
+	if (m_is_service_enabled)
+		return;
 
 	// check handle is report reference descriptor, to read the next report reference.
 	//ASSERT: rsp_handle == m_char_list[m_char_idx].report_ref_handle
@@ -1899,8 +1916,13 @@ static void on_write_response(const ble_gattc_evt_t * const p_ble_gattc_evt)
 	memset(m_write_data[rsp_handle].p_data, 0, DATA_BUFFER_SIZE);
 	memcpy_s(m_write_data[rsp_handle].p_data, DATA_BUFFER_SIZE, p_data + offset, len);
 	m_write_data[rsp_handle].len = len;
+	log_level(LOG_DEBUG, " Raise condition to mutex for write response");
 	// release lock for data_write()
 	m_cond_read_write.notify_all();
+
+	// manipulate characteristic list only in service enabling stage
+	if (m_is_service_enabled)
+		return;
 
 	// check handle is CCCD, to set the next CCCD notification.
 	//ASSERT: rsp_handle == m_char_list[m_char_idx].cccd_handle
