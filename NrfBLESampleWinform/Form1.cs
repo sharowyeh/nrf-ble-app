@@ -135,7 +135,7 @@ namespace NrfBLESampleWinform
         {
             if (connected == false || authenticated == false || comboBoxReportChar.SelectedItem == null)
             {
-                WriteLog("No device connected or report endpoint selected");
+                WriteLog("No device connected or report endpoint not selected");
                 return;
             }
 
@@ -153,55 +153,57 @@ namespace NrfBLESampleWinform
                 return;
             }
 
-            uint result = 0xff;
+            uint res = 0xff;
             var args = ((string)comboBoxReportChar.SelectedItem).Split(' ');
+            //WriteLog($"data write res:{res}");
             if (args.Length == 3)
             {
                 byte[] refs = new byte[2] {
                     byte.Parse(args[0], System.Globalization.NumberStyles.HexNumber),
                     byte.Parse(args[1], System.Globalization.NumberStyles.HexNumber),
                 };
-                result = NrfBLELibrary.DataWriteByReportRef(refs, data, (ushort)data.Length, 2000);
+                res = NrfBLELibrary.DataWriteByReportRef(refs, data, (ushort)data.Length, 2000);
             }
             // for previous csharp sample version only list endpoint handles
             else if (args.Length == 1)
             {
                 var handle = ushort.Parse(args[0], System.Globalization.NumberStyles.HexNumber);
-                result = NrfBLELibrary.DataWrite(handle, data, (ushort)data.Length, 2000);
+                res = NrfBLELibrary.DataWrite(handle, data, (ushort)data.Length, 2000);
             }
 
-            WriteLog($"data write res:{result}");
+            WriteLog($"data write res:{res}");
         }
 
         private void ButtonRead_Click(object sender, EventArgs e)
         {
             if (connected == false || authenticated == false || comboBoxReportChar.SelectedItem == null)
             {
-                WriteLog("No device connected or report endpoint selected");
+                WriteLog("No device connected or report endpoint not selected");
                 return;
             }
 
             byte[] data = new byte[NrfBLELibrary.DATA_BUFFER_SIZE];
             ushort len = NrfBLELibrary.DATA_BUFFER_SIZE;
 
-            uint result = 0xff;
+            uint res = 0xff;
             var args = ((string)comboBoxReportChar.SelectedItem).Split(' ');
+            //WriteLog($"data read res:{res}");
             if (args.Length == 3)
             {
                 byte[] refs = new byte[2] {
                     byte.Parse(args[0], System.Globalization.NumberStyles.HexNumber),
                     byte.Parse(args[1], System.Globalization.NumberStyles.HexNumber),
                 };
-                result = NrfBLELibrary.DataReadByReportRef(refs, data, ref len, 2000);
+                res = NrfBLELibrary.DataReadByReportRef(refs, data, ref len, 2000);
             }
             // for previous csharp sample version only list endpoint handles
             else if (args.Length == 1)
             {
                 var handle = ushort.Parse(args[0], System.Globalization.NumberStyles.HexNumber);
-                result = NrfBLELibrary.DataRead(handle, data, ref len, 2000);
+                res = NrfBLELibrary.DataRead(handle, data, ref len, 2000);
             }
 
-            var log = $"data read res:{result} data:";
+            var log = $"data read res:{res} data: ";
             for (int i = 0; i < len; i++)
             {
                 log += $"{data[i]:x02} ";
@@ -301,13 +303,14 @@ namespace NrfBLESampleWinform
         private void OnConnected(byte addrType, byte[] addr)
         {
             connected = true;
-            
-            WriteLog($"auth set params with key dist");
-            // default disable oob and mitm options for target device compatible
-            NrfBLELibrary.AuthSetParams(true, false, false, 0, true, true, false, false); // set key dist for owner
-            NrfBLELibrary.AuthSetParams(true, false, false, 1, true, true, false, false); // set key dist for peer
-            
-            WriteLog($"connected, auth start");
+            WriteLog($"connected, auth set param");
+            // get check box status for AuthSetParams
+            NrfBLELibrary.AuthSetParams(checkBoxLesc.Checked, checkBoxOob.Checked, checkBoxMitm.Checked,
+                0, checkBoxKdistEnc.Checked, checkBoxKdistId.Checked, false, false);
+            NrfBLELibrary.AuthSetParams(checkBoxLesc.Checked, checkBoxOob.Checked, checkBoxMitm.Checked,
+                1, checkBoxKdistEnc.Checked, checkBoxKdistId.Checked, false, false);
+            WriteLog($"auth start");
+            //BLE_GAP_IO_CAPS_KEYBOARD_ONLY = 0x02
             NrfBLELibrary.AuthStart(true, false, 0x2, "456789");
         }
 

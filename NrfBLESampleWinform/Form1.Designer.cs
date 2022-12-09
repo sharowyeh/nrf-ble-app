@@ -51,6 +51,14 @@
             this.label6 = new System.Windows.Forms.Label();
             this.comboBoxDiscovered = new System.Windows.Forms.ComboBox();
             this.buttonScanStop = new System.Windows.Forms.Button();
+            this.checkBoxLesc = new System.Windows.Forms.CheckBox();
+            this.checkBoxOob = new System.Windows.Forms.CheckBox();
+            this.checkBoxMitm = new System.Windows.Forms.CheckBox();
+            this.checkBoxKeypress = new System.Windows.Forms.CheckBox();
+            this.checkBoxKdistId = new System.Windows.Forms.CheckBox();
+            this.checkBoxKdistEnc = new System.Windows.Forms.CheckBox();
+            this.label7 = new System.Windows.Forms.Label();
+            this.label8 = new System.Windows.Forms.Label();
             this.SuspendLayout();
             // 
             // textBoxLog
@@ -152,7 +160,7 @@
             // comboBoxReportChar
             // 
             this.comboBoxReportChar.FormattingEnabled = true;
-            this.comboBoxReportChar.Location = new System.Drawing.Point(622, 258);
+            this.comboBoxReportChar.Location = new System.Drawing.Point(622, 298);
             this.comboBoxReportChar.Name = "comboBoxReportChar";
             this.comboBoxReportChar.Size = new System.Drawing.Size(150, 25);
             this.comboBoxReportChar.TabIndex = 11;
@@ -160,7 +168,7 @@
             // label5
             // 
             this.label5.AutoSize = true;
-            this.label5.Location = new System.Drawing.Point(569, 261);
+            this.label5.Location = new System.Drawing.Point(569, 301);
             this.label5.Name = "label5";
             this.label5.Size = new System.Drawing.Size(47, 17);
             this.label5.TabIndex = 12;
@@ -168,7 +176,7 @@
             // 
             // textBoxWriteData
             // 
-            this.textBoxWriteData.Location = new System.Drawing.Point(622, 289);
+            this.textBoxWriteData.Location = new System.Drawing.Point(622, 329);
             this.textBoxWriteData.Name = "textBoxWriteData";
             this.textBoxWriteData.Size = new System.Drawing.Size(150, 24);
             this.textBoxWriteData.TabIndex = 13;
@@ -176,7 +184,7 @@
             // 
             // textBoxReadData
             // 
-            this.textBoxReadData.Location = new System.Drawing.Point(622, 319);
+            this.textBoxReadData.Location = new System.Drawing.Point(622, 359);
             this.textBoxReadData.Name = "textBoxReadData";
             this.textBoxReadData.ReadOnly = true;
             this.textBoxReadData.Size = new System.Drawing.Size(150, 24);
@@ -184,7 +192,7 @@
             // 
             // buttonDisconnect
             // 
-            this.buttonDisconnect.Location = new System.Drawing.Point(652, 365);
+            this.buttonDisconnect.Location = new System.Drawing.Point(652, 393);
             this.buttonDisconnect.Name = "buttonDisconnect";
             this.buttonDisconnect.Size = new System.Drawing.Size(120, 25);
             this.buttonDisconnect.TabIndex = 17;
@@ -193,7 +201,7 @@
             // 
             // buttonDongleReset
             // 
-            this.buttonDongleReset.Location = new System.Drawing.Point(652, 396);
+            this.buttonDongleReset.Location = new System.Drawing.Point(652, 424);
             this.buttonDongleReset.Name = "buttonDongleReset";
             this.buttonDongleReset.Size = new System.Drawing.Size(120, 25);
             this.buttonDongleReset.TabIndex = 18;
@@ -211,7 +219,7 @@
             // 
             // buttonWrite
             // 
-            this.buttonWrite.Location = new System.Drawing.Point(568, 289);
+            this.buttonWrite.Location = new System.Drawing.Point(568, 329);
             this.buttonWrite.Name = "buttonWrite";
             this.buttonWrite.Size = new System.Drawing.Size(48, 25);
             this.buttonWrite.TabIndex = 21;
@@ -220,7 +228,7 @@
             // 
             // buttonRead
             // 
-            this.buttonRead.Location = new System.Drawing.Point(568, 318);
+            this.buttonRead.Location = new System.Drawing.Point(568, 358);
             this.buttonRead.Name = "buttonRead";
             this.buttonRead.Size = new System.Drawing.Size(48, 25);
             this.buttonRead.TabIndex = 22;
@@ -253,10 +261,100 @@
             this.buttonScanStop.Text = "Scan stop";
             this.buttonScanStop.UseVisualStyleBackColor = true;
             // 
+            // checkBoxLesc
+            // 
+            this.checkBoxLesc.AutoSize = true;
+            this.checkBoxLesc.Checked = true;
+            this.checkBoxLesc.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.checkBoxLesc.Location = new System.Drawing.Point(622, 229);
+            this.checkBoxLesc.Name = "checkBoxLesc";
+            this.checkBoxLesc.Size = new System.Drawing.Size(53, 21);
+            this.checkBoxLesc.TabIndex = 26;
+            this.checkBoxLesc.Text = "LESC";
+            this.checkBoxLesc.UseVisualStyleBackColor = true;
+            // 
+            // checkBoxOob
+            // 
+            this.checkBoxOob.AutoSize = true;
+            this.checkBoxOob.Location = new System.Drawing.Point(681, 229);
+            this.checkBoxOob.Name = "checkBoxOob";
+            this.checkBoxOob.Size = new System.Drawing.Size(53, 21);
+            this.checkBoxOob.TabIndex = 27;
+            this.checkBoxOob.Text = "OOB";
+            this.checkBoxOob.UseVisualStyleBackColor = true;
+            // 
+            // checkBoxMitm
+            // 
+            this.checkBoxMitm.AutoSize = true;
+            this.checkBoxMitm.Location = new System.Drawing.Point(622, 247);
+            this.checkBoxMitm.Name = "checkBoxMitm";
+            this.checkBoxMitm.Size = new System.Drawing.Size(62, 21);
+            this.checkBoxMitm.TabIndex = 28;
+            this.checkBoxMitm.Text = "MITM";
+            this.checkBoxMitm.UseVisualStyleBackColor = true;
+            // 
+            // checkBoxKeypress
+            // 
+            this.checkBoxKeypress.AutoSize = true;
+            this.checkBoxKeypress.Location = new System.Drawing.Point(681, 247);
+            this.checkBoxKeypress.Name = "checkBoxKeypress";
+            this.checkBoxKeypress.Size = new System.Drawing.Size(76, 21);
+            this.checkBoxKeypress.TabIndex = 29;
+            this.checkBoxKeypress.Text = "Keypress";
+            this.checkBoxKeypress.UseVisualStyleBackColor = true;
+            // 
+            // checkBoxKdistId
+            // 
+            this.checkBoxKdistId.AutoSize = true;
+            this.checkBoxKdistId.Location = new System.Drawing.Point(681, 265);
+            this.checkBoxKdistId.Name = "checkBoxKdistId";
+            this.checkBoxKdistId.Size = new System.Drawing.Size(38, 21);
+            this.checkBoxKdistId.TabIndex = 31;
+            this.checkBoxKdistId.Text = "Id";
+            this.checkBoxKdistId.UseVisualStyleBackColor = true;
+            // 
+            // checkBoxKdistEnc
+            // 
+            this.checkBoxKdistEnc.AutoSize = true;
+            this.checkBoxKdistEnc.Checked = true;
+            this.checkBoxKdistEnc.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.checkBoxKdistEnc.Location = new System.Drawing.Point(622, 265);
+            this.checkBoxKdistEnc.Name = "checkBoxKdistEnc";
+            this.checkBoxKdistEnc.Size = new System.Drawing.Size(47, 21);
+            this.checkBoxKdistEnc.TabIndex = 30;
+            this.checkBoxKdistEnc.Text = "Enc";
+            this.checkBoxKdistEnc.UseVisualStyleBackColor = true;
+            // 
+            // label7
+            // 
+            this.label7.AutoSize = true;
+            this.label7.Location = new System.Drawing.Point(569, 230);
+            this.label7.Name = "label7";
+            this.label7.Size = new System.Drawing.Size(35, 17);
+            this.label7.TabIndex = 32;
+            this.label7.Text = "Auth";
+            // 
+            // label8
+            // 
+            this.label8.AutoSize = true;
+            this.label8.Location = new System.Drawing.Point(569, 266);
+            this.label8.Name = "label8";
+            this.label8.Size = new System.Drawing.Size(50, 17);
+            this.label8.TabIndex = 33;
+            this.label8.Text = "KeyDist";
+            // 
             // Form1
             // 
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.None;
             this.ClientSize = new System.Drawing.Size(784, 461);
+            this.Controls.Add(this.label8);
+            this.Controls.Add(this.label7);
+            this.Controls.Add(this.checkBoxKdistId);
+            this.Controls.Add(this.checkBoxKdistEnc);
+            this.Controls.Add(this.checkBoxKeypress);
+            this.Controls.Add(this.checkBoxMitm);
+            this.Controls.Add(this.checkBoxOob);
+            this.Controls.Add(this.checkBoxLesc);
             this.Controls.Add(this.buttonScanStop);
             this.Controls.Add(this.label6);
             this.Controls.Add(this.comboBoxDiscovered);
@@ -313,6 +411,14 @@
         private System.Windows.Forms.Label label6;
         private System.Windows.Forms.ComboBox comboBoxDiscovered;
         private System.Windows.Forms.Button buttonScanStop;
+        private System.Windows.Forms.CheckBox checkBoxLesc;
+        private System.Windows.Forms.CheckBox checkBoxOob;
+        private System.Windows.Forms.CheckBox checkBoxMitm;
+        private System.Windows.Forms.CheckBox checkBoxKeypress;
+        private System.Windows.Forms.CheckBox checkBoxKdistId;
+        private System.Windows.Forms.CheckBox checkBoxKdistEnc;
+        private System.Windows.Forms.Label label7;
+        private System.Windows.Forms.Label label8;
     }
 }
 

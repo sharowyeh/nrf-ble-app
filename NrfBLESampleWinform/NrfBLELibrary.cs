@@ -119,7 +119,7 @@ namespace NrfBLESampleWinform
 
         [DllImport("nrf_ble_library.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi, EntryPoint = "data_write_async")]
         public static extern uint DataWriteAsync(ushort handle,
-            [MarshalAs(UnmanagedType.LPArray, SizeConst = DATA_BUFFER_SIZE)] byte[] data, ushort len);
+            [MarshalAs(UnmanagedType.LPArray, SizeConst = DATA_BUFFER_SIZE)]byte[] data, ushort len);
 
         [DllImport("nrf_ble_library.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi, EntryPoint = "data_write")]
         public static extern uint DataWrite(ushort handle,
