@@ -39,7 +39,7 @@
             this.label3 = new System.Windows.Forms.Label();
             this.label4 = new System.Windows.Forms.Label();
             this.buttonScanStart = new System.Windows.Forms.Button();
-            this.comboBoxReportChar = new System.Windows.Forms.ComboBox();
+            this.comboBoxWriteReportChar = new System.Windows.Forms.ComboBox();
             this.label5 = new System.Windows.Forms.Label();
             this.textBoxWriteData = new System.Windows.Forms.TextBox();
             this.textBoxReadData = new System.Windows.Forms.TextBox();
@@ -59,21 +59,27 @@
             this.checkBoxKdistEnc = new System.Windows.Forms.CheckBox();
             this.label7 = new System.Windows.Forms.Label();
             this.label8 = new System.Windows.Forms.Label();
+            this.label9 = new System.Windows.Forms.Label();
+            this.comboBoxReadReportChar = new System.Windows.Forms.ComboBox();
+            this.checkBoxBond = new System.Windows.Forms.CheckBox();
+            this.comboBoxIoCaps = new System.Windows.Forms.ComboBox();
+            this.label10 = new System.Windows.Forms.Label();
+            this.textBoxPasskey = new System.Windows.Forms.TextBox();
             this.SuspendLayout();
             // 
             // textBoxLog
             // 
-            this.textBoxLog.Location = new System.Drawing.Point(12, 43);
+            this.textBoxLog.Location = new System.Drawing.Point(222, 104);
             this.textBoxLog.Multiline = true;
             this.textBoxLog.Name = "textBoxLog";
             this.textBoxLog.ReadOnly = true;
             this.textBoxLog.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.textBoxLog.Size = new System.Drawing.Size(550, 394);
+            this.textBoxLog.Size = new System.Drawing.Size(550, 345);
             this.textBoxLog.TabIndex = 0;
             // 
             // textBoxSerialPort
             // 
-            this.textBoxSerialPort.Location = new System.Drawing.Point(652, 12);
+            this.textBoxSerialPort.Location = new System.Drawing.Point(96, 12);
             this.textBoxSerialPort.Name = "textBoxSerialPort";
             this.textBoxSerialPort.Size = new System.Drawing.Size(120, 24);
             this.textBoxSerialPort.TabIndex = 1;
@@ -81,7 +87,7 @@
             // 
             // textBoxBaudRate
             // 
-            this.textBoxBaudRate.Location = new System.Drawing.Point(652, 42);
+            this.textBoxBaudRate.Location = new System.Drawing.Point(96, 42);
             this.textBoxBaudRate.Name = "textBoxBaudRate";
             this.textBoxBaudRate.Size = new System.Drawing.Size(120, 24);
             this.textBoxBaudRate.TabIndex = 2;
@@ -90,7 +96,7 @@
             // label1
             // 
             this.label1.AutoSize = true;
-            this.label1.Location = new System.Drawing.Point(569, 15);
+            this.label1.Location = new System.Drawing.Point(12, 16);
             this.label1.Name = "label1";
             this.label1.Size = new System.Drawing.Size(66, 17);
             this.label1.TabIndex = 3;
@@ -99,7 +105,7 @@
             // label2
             // 
             this.label2.AutoSize = true;
-            this.label2.Location = new System.Drawing.Point(569, 45);
+            this.label2.Location = new System.Drawing.Point(12, 45);
             this.label2.Name = "label2";
             this.label2.Size = new System.Drawing.Size(64, 17);
             this.label2.TabIndex = 4;
@@ -107,7 +113,7 @@
             // 
             // buttonDongleInit
             // 
-            this.buttonDongleInit.Location = new System.Drawing.Point(652, 72);
+            this.buttonDongleInit.Location = new System.Drawing.Point(96, 72);
             this.buttonDongleInit.Name = "buttonDongleInit";
             this.buttonDongleInit.Size = new System.Drawing.Size(120, 25);
             this.buttonDongleInit.TabIndex = 5;
@@ -116,7 +122,7 @@
             // 
             // textBoxRssi
             // 
-            this.textBoxRssi.Location = new System.Drawing.Point(652, 133);
+            this.textBoxRssi.Location = new System.Drawing.Point(96, 133);
             this.textBoxRssi.Name = "textBoxRssi";
             this.textBoxRssi.Size = new System.Drawing.Size(120, 24);
             this.textBoxRssi.TabIndex = 7;
@@ -124,7 +130,7 @@
             // 
             // textBoxAddress
             // 
-            this.textBoxAddress.Location = new System.Drawing.Point(652, 103);
+            this.textBoxAddress.Location = new System.Drawing.Point(96, 103);
             this.textBoxAddress.Name = "textBoxAddress";
             this.textBoxAddress.Size = new System.Drawing.Size(120, 24);
             this.textBoxAddress.TabIndex = 6;
@@ -133,7 +139,7 @@
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(569, 106);
+            this.label3.Location = new System.Drawing.Point(12, 106);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(52, 17);
             this.label3.TabIndex = 9;
@@ -142,7 +148,7 @@
             // label4
             // 
             this.label4.AutoSize = true;
-            this.label4.Location = new System.Drawing.Point(569, 136);
+            this.label4.Location = new System.Drawing.Point(12, 136);
             this.label4.Name = "label4";
             this.label4.Size = new System.Drawing.Size(29, 17);
             this.label4.TabIndex = 8;
@@ -150,25 +156,25 @@
             // 
             // buttonScanStart
             // 
-            this.buttonScanStart.Location = new System.Drawing.Point(652, 163);
+            this.buttonScanStart.Location = new System.Drawing.Point(96, 163);
             this.buttonScanStart.Name = "buttonScanStart";
             this.buttonScanStart.Size = new System.Drawing.Size(120, 25);
             this.buttonScanStart.TabIndex = 10;
             this.buttonScanStart.Text = "Scan start";
             this.buttonScanStart.UseVisualStyleBackColor = true;
             // 
-            // comboBoxReportChar
+            // comboBoxWriteReportChar
             // 
-            this.comboBoxReportChar.FormattingEnabled = true;
-            this.comboBoxReportChar.Location = new System.Drawing.Point(622, 298);
-            this.comboBoxReportChar.Name = "comboBoxReportChar";
-            this.comboBoxReportChar.Size = new System.Drawing.Size(150, 25);
-            this.comboBoxReportChar.TabIndex = 11;
+            this.comboBoxWriteReportChar.FormattingEnabled = true;
+            this.comboBoxWriteReportChar.Location = new System.Drawing.Point(312, 43);
+            this.comboBoxWriteReportChar.Name = "comboBoxWriteReportChar";
+            this.comboBoxWriteReportChar.Size = new System.Drawing.Size(120, 25);
+            this.comboBoxWriteReportChar.TabIndex = 11;
             // 
             // label5
             // 
             this.label5.AutoSize = true;
-            this.label5.Location = new System.Drawing.Point(569, 301);
+            this.label5.Location = new System.Drawing.Point(259, 46);
             this.label5.Name = "label5";
             this.label5.Size = new System.Drawing.Size(47, 17);
             this.label5.TabIndex = 12;
@@ -176,23 +182,23 @@
             // 
             // textBoxWriteData
             // 
-            this.textBoxWriteData.Location = new System.Drawing.Point(622, 329);
+            this.textBoxWriteData.Location = new System.Drawing.Point(438, 43);
             this.textBoxWriteData.Name = "textBoxWriteData";
-            this.textBoxWriteData.Size = new System.Drawing.Size(150, 24);
+            this.textBoxWriteData.Size = new System.Drawing.Size(208, 24);
             this.textBoxWriteData.TabIndex = 13;
             this.textBoxWriteData.Text = "00 00 00 00";
             // 
             // textBoxReadData
             // 
-            this.textBoxReadData.Location = new System.Drawing.Point(622, 359);
+            this.textBoxReadData.Location = new System.Drawing.Point(438, 73);
             this.textBoxReadData.Name = "textBoxReadData";
             this.textBoxReadData.ReadOnly = true;
-            this.textBoxReadData.Size = new System.Drawing.Size(150, 24);
+            this.textBoxReadData.Size = new System.Drawing.Size(208, 24);
             this.textBoxReadData.TabIndex = 15;
             // 
             // buttonDisconnect
             // 
-            this.buttonDisconnect.Location = new System.Drawing.Point(652, 393);
+            this.buttonDisconnect.Location = new System.Drawing.Point(96, 393);
             this.buttonDisconnect.Name = "buttonDisconnect";
             this.buttonDisconnect.Size = new System.Drawing.Size(120, 25);
             this.buttonDisconnect.TabIndex = 17;
@@ -201,7 +207,7 @@
             // 
             // buttonDongleReset
             // 
-            this.buttonDongleReset.Location = new System.Drawing.Point(652, 424);
+            this.buttonDongleReset.Location = new System.Drawing.Point(96, 424);
             this.buttonDongleReset.Name = "buttonDongleReset";
             this.buttonDongleReset.Size = new System.Drawing.Size(120, 25);
             this.buttonDongleReset.TabIndex = 18;
@@ -210,7 +216,7 @@
             // 
             // buttonConnect
             // 
-            this.buttonConnect.Location = new System.Drawing.Point(408, 11);
+            this.buttonConnect.Location = new System.Drawing.Point(652, 12);
             this.buttonConnect.Name = "buttonConnect";
             this.buttonConnect.Size = new System.Drawing.Size(120, 25);
             this.buttonConnect.TabIndex = 20;
@@ -219,18 +225,18 @@
             // 
             // buttonWrite
             // 
-            this.buttonWrite.Location = new System.Drawing.Point(568, 329);
+            this.buttonWrite.Location = new System.Drawing.Point(652, 42);
             this.buttonWrite.Name = "buttonWrite";
-            this.buttonWrite.Size = new System.Drawing.Size(48, 25);
+            this.buttonWrite.Size = new System.Drawing.Size(120, 25);
             this.buttonWrite.TabIndex = 21;
             this.buttonWrite.Text = "Write";
             this.buttonWrite.UseVisualStyleBackColor = true;
             // 
             // buttonRead
             // 
-            this.buttonRead.Location = new System.Drawing.Point(568, 358);
+            this.buttonRead.Location = new System.Drawing.Point(652, 72);
             this.buttonRead.Name = "buttonRead";
-            this.buttonRead.Size = new System.Drawing.Size(48, 25);
+            this.buttonRead.Size = new System.Drawing.Size(120, 25);
             this.buttonRead.TabIndex = 22;
             this.buttonRead.Text = "Read";
             this.buttonRead.UseVisualStyleBackColor = true;
@@ -238,7 +244,7 @@
             // label6
             // 
             this.label6.AutoSize = true;
-            this.label6.Location = new System.Drawing.Point(12, 15);
+            this.label6.Location = new System.Drawing.Point(222, 16);
             this.label6.Name = "label6";
             this.label6.Size = new System.Drawing.Size(84, 17);
             this.label6.TabIndex = 24;
@@ -247,14 +253,14 @@
             // comboBoxDiscovered
             // 
             this.comboBoxDiscovered.FormattingEnabled = true;
-            this.comboBoxDiscovered.Location = new System.Drawing.Point(102, 12);
+            this.comboBoxDiscovered.Location = new System.Drawing.Point(312, 13);
             this.comboBoxDiscovered.Name = "comboBoxDiscovered";
-            this.comboBoxDiscovered.Size = new System.Drawing.Size(300, 25);
+            this.comboBoxDiscovered.Size = new System.Drawing.Size(334, 25);
             this.comboBoxDiscovered.TabIndex = 23;
             // 
             // buttonScanStop
             // 
-            this.buttonScanStop.Location = new System.Drawing.Point(652, 194);
+            this.buttonScanStop.Location = new System.Drawing.Point(96, 194);
             this.buttonScanStop.Name = "buttonScanStop";
             this.buttonScanStop.Size = new System.Drawing.Size(120, 25);
             this.buttonScanStop.TabIndex = 25;
@@ -266,7 +272,7 @@
             this.checkBoxLesc.AutoSize = true;
             this.checkBoxLesc.Checked = true;
             this.checkBoxLesc.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.checkBoxLesc.Location = new System.Drawing.Point(622, 229);
+            this.checkBoxLesc.Location = new System.Drawing.Point(155, 233);
             this.checkBoxLesc.Name = "checkBoxLesc";
             this.checkBoxLesc.Size = new System.Drawing.Size(53, 21);
             this.checkBoxLesc.TabIndex = 26;
@@ -276,7 +282,7 @@
             // checkBoxOob
             // 
             this.checkBoxOob.AutoSize = true;
-            this.checkBoxOob.Location = new System.Drawing.Point(681, 229);
+            this.checkBoxOob.Location = new System.Drawing.Point(96, 252);
             this.checkBoxOob.Name = "checkBoxOob";
             this.checkBoxOob.Size = new System.Drawing.Size(53, 21);
             this.checkBoxOob.TabIndex = 27;
@@ -286,7 +292,7 @@
             // checkBoxMitm
             // 
             this.checkBoxMitm.AutoSize = true;
-            this.checkBoxMitm.Location = new System.Drawing.Point(622, 247);
+            this.checkBoxMitm.Location = new System.Drawing.Point(155, 252);
             this.checkBoxMitm.Name = "checkBoxMitm";
             this.checkBoxMitm.Size = new System.Drawing.Size(62, 21);
             this.checkBoxMitm.TabIndex = 28;
@@ -296,7 +302,7 @@
             // checkBoxKeypress
             // 
             this.checkBoxKeypress.AutoSize = true;
-            this.checkBoxKeypress.Location = new System.Drawing.Point(681, 247);
+            this.checkBoxKeypress.Location = new System.Drawing.Point(96, 271);
             this.checkBoxKeypress.Name = "checkBoxKeypress";
             this.checkBoxKeypress.Size = new System.Drawing.Size(76, 21);
             this.checkBoxKeypress.TabIndex = 29;
@@ -306,7 +312,7 @@
             // checkBoxKdistId
             // 
             this.checkBoxKdistId.AutoSize = true;
-            this.checkBoxKdistId.Location = new System.Drawing.Point(681, 265);
+            this.checkBoxKdistId.Location = new System.Drawing.Point(155, 355);
             this.checkBoxKdistId.Name = "checkBoxKdistId";
             this.checkBoxKdistId.Size = new System.Drawing.Size(38, 21);
             this.checkBoxKdistId.TabIndex = 31;
@@ -318,7 +324,7 @@
             this.checkBoxKdistEnc.AutoSize = true;
             this.checkBoxKdistEnc.Checked = true;
             this.checkBoxKdistEnc.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.checkBoxKdistEnc.Location = new System.Drawing.Point(622, 265);
+            this.checkBoxKdistEnc.Location = new System.Drawing.Point(96, 355);
             this.checkBoxKdistEnc.Name = "checkBoxKdistEnc";
             this.checkBoxKdistEnc.Size = new System.Drawing.Size(47, 21);
             this.checkBoxKdistEnc.TabIndex = 30;
@@ -328,7 +334,7 @@
             // label7
             // 
             this.label7.AutoSize = true;
-            this.label7.Location = new System.Drawing.Point(569, 230);
+            this.label7.Location = new System.Drawing.Point(12, 234);
             this.label7.Name = "label7";
             this.label7.Size = new System.Drawing.Size(35, 17);
             this.label7.TabIndex = 32;
@@ -337,16 +343,76 @@
             // label8
             // 
             this.label8.AutoSize = true;
-            this.label8.Location = new System.Drawing.Point(569, 266);
+            this.label8.Location = new System.Drawing.Point(12, 355);
             this.label8.Name = "label8";
-            this.label8.Size = new System.Drawing.Size(50, 17);
+            this.label8.Size = new System.Drawing.Size(73, 34);
             this.label8.TabIndex = 33;
-            this.label8.Text = "KeyDist";
+            this.label8.Text = "KeyDist\r\n(own+peer)";
+            // 
+            // label9
+            // 
+            this.label9.AutoSize = true;
+            this.label9.Location = new System.Drawing.Point(259, 76);
+            this.label9.Name = "label9";
+            this.label9.Size = new System.Drawing.Size(47, 17);
+            this.label9.TabIndex = 35;
+            this.label9.Text = "Report";
+            // 
+            // comboBoxReadReportChar
+            // 
+            this.comboBoxReadReportChar.FormattingEnabled = true;
+            this.comboBoxReadReportChar.Location = new System.Drawing.Point(312, 73);
+            this.comboBoxReadReportChar.Name = "comboBoxReadReportChar";
+            this.comboBoxReadReportChar.Size = new System.Drawing.Size(120, 25);
+            this.comboBoxReadReportChar.TabIndex = 34;
+            // 
+            // checkBoxBond
+            // 
+            this.checkBoxBond.AutoSize = true;
+            this.checkBoxBond.Checked = true;
+            this.checkBoxBond.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.checkBoxBond.Location = new System.Drawing.Point(96, 233);
+            this.checkBoxBond.Name = "checkBoxBond";
+            this.checkBoxBond.Size = new System.Drawing.Size(56, 21);
+            this.checkBoxBond.TabIndex = 36;
+            this.checkBoxBond.Text = "Bond";
+            this.checkBoxBond.UseVisualStyleBackColor = true;
+            // 
+            // comboBoxIoCaps
+            // 
+            this.comboBoxIoCaps.FormattingEnabled = true;
+            this.comboBoxIoCaps.Location = new System.Drawing.Point(96, 324);
+            this.comboBoxIoCaps.Name = "comboBoxIoCaps";
+            this.comboBoxIoCaps.Size = new System.Drawing.Size(120, 25);
+            this.comboBoxIoCaps.TabIndex = 37;
+            // 
+            // label10
+            // 
+            this.label10.AutoSize = true;
+            this.label10.Location = new System.Drawing.Point(12, 284);
+            this.label10.Name = "label10";
+            this.label10.Size = new System.Drawing.Size(56, 34);
+            this.label10.TabIndex = 39;
+            this.label10.Text = "Passkey\r\n(6 digits)";
+            // 
+            // textBoxPasskey
+            // 
+            this.textBoxPasskey.Location = new System.Drawing.Point(96, 294);
+            this.textBoxPasskey.Name = "textBoxPasskey";
+            this.textBoxPasskey.Size = new System.Drawing.Size(120, 24);
+            this.textBoxPasskey.TabIndex = 38;
+            this.textBoxPasskey.Text = "123456";
             // 
             // Form1
             // 
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.None;
             this.ClientSize = new System.Drawing.Size(784, 461);
+            this.Controls.Add(this.label10);
+            this.Controls.Add(this.textBoxPasskey);
+            this.Controls.Add(this.comboBoxIoCaps);
+            this.Controls.Add(this.checkBoxBond);
+            this.Controls.Add(this.label9);
+            this.Controls.Add(this.comboBoxReadReportChar);
             this.Controls.Add(this.label8);
             this.Controls.Add(this.label7);
             this.Controls.Add(this.checkBoxKdistId);
@@ -366,7 +432,7 @@
             this.Controls.Add(this.textBoxReadData);
             this.Controls.Add(this.textBoxWriteData);
             this.Controls.Add(this.label5);
-            this.Controls.Add(this.comboBoxReportChar);
+            this.Controls.Add(this.comboBoxWriteReportChar);
             this.Controls.Add(this.buttonScanStart);
             this.Controls.Add(this.label3);
             this.Controls.Add(this.label4);
@@ -399,7 +465,7 @@
         private System.Windows.Forms.Label label3;
         private System.Windows.Forms.Label label4;
         private System.Windows.Forms.Button buttonScanStart;
-        private System.Windows.Forms.ComboBox comboBoxReportChar;
+        private System.Windows.Forms.ComboBox comboBoxWriteReportChar;
         private System.Windows.Forms.Label label5;
         private System.Windows.Forms.TextBox textBoxWriteData;
         private System.Windows.Forms.TextBox textBoxReadData;
@@ -419,6 +485,12 @@
         private System.Windows.Forms.CheckBox checkBoxKdistEnc;
         private System.Windows.Forms.Label label7;
         private System.Windows.Forms.Label label8;
+        private System.Windows.Forms.Label label9;
+        private System.Windows.Forms.ComboBox comboBoxReadReportChar;
+        private System.Windows.Forms.CheckBox checkBoxBond;
+        private System.Windows.Forms.ComboBox comboBoxIoCaps;
+        private System.Windows.Forms.Label label10;
+        private System.Windows.Forms.TextBox textBoxPasskey;
     }
 }
 

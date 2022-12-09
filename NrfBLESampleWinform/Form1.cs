@@ -85,6 +85,13 @@ namespace NrfBLESampleWinform
             buttonRead.Click += ButtonRead_Click;
             buttonDisconnect.Click += ButtonDisconnect_Click;
             buttonDongleReset.Click += ButtonDongleReset_Click;
+
+            comboBoxIoCaps.Items.Add("Display Only");  // BLE_GAP_IO_CAPS_DISPLAY_ONLY  0x00
+            comboBoxIoCaps.Items.Add("Display YesNo"); // BLE_GAP_IO_CAPS_DISPLAY_YESNO 0x01
+            comboBoxIoCaps.Items.Add("Keyboard Only"); // BLE_GAP_IO_CAPS_KEYBOARD_ONLY 0x02
+            comboBoxIoCaps.Items.Add("None");          // BLE_GAP_IO_CAPS_NONE 0x03
+            comboBoxIoCaps.Items.Add("Kbd + Display"); // BLE_GAP_IO_CAPS_KEYBOARD_DISPLAY 0x04
+            comboBoxIoCaps.SelectedIndex = 2;
         }
 
         private void ComboBoxDiscovered_SelectedIndexChanged(object sender, EventArgs e)
@@ -133,7 +140,7 @@ namespace NrfBLESampleWinform
 
         private void ButtonWrite_Click(object sender, EventArgs e)
         {
-            if (connected == false || authenticated == false || comboBoxReportChar.SelectedItem == null)
+            if (connected == false || authenticated == false || comboBoxWriteReportChar.SelectedItem == null)
             {
                 WriteLog("No device connected or report endpoint not selected");
                 return;
@@ -154,7 +161,7 @@ namespace NrfBLESampleWinform
             }
 
             uint res = 0xff;
-            var args = ((string)comboBoxReportChar.SelectedItem).Split(' ');
+            var args = ((string)comboBoxWriteReportChar.SelectedItem).Split(' ');
             //WriteLog($"data write res:{res}");
             if (args.Length == 3)
             {
@@ -176,7 +183,7 @@ namespace NrfBLESampleWinform
 
         private void ButtonRead_Click(object sender, EventArgs e)
         {
-            if (connected == false || authenticated == false || comboBoxReportChar.SelectedItem == null)
+            if (connected == false || authenticated == false || comboBoxReadReportChar.SelectedItem == null)
             {
                 WriteLog("No device connected or report endpoint not selected");
                 return;
@@ -186,7 +193,7 @@ namespace NrfBLESampleWinform
             ushort len = NrfBLELibrary.DATA_BUFFER_SIZE;
 
             uint res = 0xff;
-            var args = ((string)comboBoxReportChar.SelectedItem).Split(' ');
+            var args = ((string)comboBoxReadReportChar.SelectedItem).Split(' ');
             //WriteLog($"data read res:{res}");
             if (args.Length == 3)
             {
@@ -207,6 +214,8 @@ namespace NrfBLESampleWinform
             for (int i = 0; i < len; i++)
             {
                 log += $"{data[i]:x02} ";
+                if (res == 0)
+                    textBoxReadData.Text += $"{data[i]:x02} ";
             }
             WriteLog(log);
         }
@@ -246,7 +255,7 @@ namespace NrfBLESampleWinform
             {
                 label6.Text = "0 Discovered:";
                 discoveredList.Clear();
-                comboBoxReportChar.Items.Clear();
+                comboBoxWriteReportChar.Items.Clear();
             }));
         }
 
@@ -304,14 +313,22 @@ namespace NrfBLESampleWinform
         {
             connected = true;
             WriteLog($"connected, auth set param");
-            // get check box status for AuthSetParams
-            NrfBLELibrary.AuthSetParams(checkBoxLesc.Checked, checkBoxOob.Checked, checkBoxMitm.Checked,
-                0, checkBoxKdistEnc.Checked, checkBoxKdistId.Checked, false, false);
-            NrfBLELibrary.AuthSetParams(checkBoxLesc.Checked, checkBoxOob.Checked, checkBoxMitm.Checked,
-                1, checkBoxKdistEnc.Checked, checkBoxKdistId.Checked, false, false);
-            WriteLog($"auth start");
-            //BLE_GAP_IO_CAPS_KEYBOARD_ONLY = 0x02
-            NrfBLELibrary.AuthStart(true, false, 0x2, "456789");
+            // invoke to UI thread for authentication settings
+            this.Invoke(new Action(() =>
+            {
+                // get check box status for AuthSetParams
+                NrfBLELibrary.AuthSetParams(checkBoxLesc.Checked, checkBoxOob.Checked, checkBoxMitm.Checked,
+                    0, checkBoxKdistEnc.Checked, checkBoxKdistId.Checked, false, false);
+                NrfBLELibrary.AuthSetParams(checkBoxLesc.Checked, checkBoxOob.Checked, checkBoxMitm.Checked,
+                    1, checkBoxKdistEnc.Checked, checkBoxKdistId.Checked, false, false);
+
+                var validPasskey = textBoxPasskey.Text.Trim().Substring(0, 6).PadRight(6, '0');
+                validPasskey = System.Text.RegularExpressions.Regex.Replace(validPasskey, "[^\\d+$]", "0");
+                textBoxPasskey.Text = validPasskey;
+                WriteLog($"auth start, specify passkey {validPasskey}");
+                NrfBLELibrary.AuthStart(checkBoxBond.Checked, checkBoxKeypress.Checked,
+                    (byte)comboBoxIoCaps.SelectedIndex, validPasskey);
+            }));
         }
 
         private void OnPasskeyRequired(string passkey)
@@ -354,14 +371,19 @@ namespace NrfBLESampleWinform
             byte[] refs_list = new byte[512];
             ushort len = 256;
             NrfBLELibrary.ReportCharList(handle_list, refs_list, ref len);
-            comboBoxReportChar.Invoke(new Action<ushort[], byte[], ushort>((h, r, l) => {
-                comboBoxReportChar.Items.Clear();
+            comboBoxWriteReportChar.Invoke(new Action<ushort[], byte[], ushort>((h, r, l) => {
+                comboBoxWriteReportChar.Items.Clear();
+                comboBoxReadReportChar.Items.Clear();
                 for (int i = 0; i < l; i++)
                 {
-                    comboBoxReportChar.Items.Add($"{r[i * 2]:x02} {r[i * 2 + 1]:x02} {h[i]:x04}");
+                    comboBoxWriteReportChar.Items.Add($"{r[i * 2]:x02} {r[i * 2 + 1]:x02} {h[i]:x04}");
+                    comboBoxReadReportChar.Items.Add($"{r[i * 2]:x02} {r[i * 2 + 1]:x02} {h[i]:x04}");
                 }
                 if (l > 0)
-                    comboBoxReportChar.SelectedIndex = 0;
+                {
+                    comboBoxWriteReportChar.SelectedIndex = 0;
+                    comboBoxReadReportChar.SelectedIndex = 0;
+                }
             }), handle_list, refs_list, len);
             
             WriteLog("=== ready to inteact via report characteristic(use hex) ===");
