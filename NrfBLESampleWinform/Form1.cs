@@ -210,6 +210,7 @@ namespace NrfBLESampleWinform
                 res = NrfBLELibrary.DataRead(handle, data, ref len, 2000);
             }
 
+            textBoxReadData.Text = "";
             var log = $"data read res:{res} data: ";
             for (int i = 0; i < len; i++)
             {
