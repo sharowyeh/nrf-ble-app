@@ -247,13 +247,19 @@ static void log_file(char *level, const char * message)
 	time_t tt = std::chrono::system_clock::to_time_t(now);
 	tm local = { 0 };
 	localtime_s(&local, &tt);
-	char path[16] = { 0 };
+	char name[16] = { 0 };
 	char time[16] = { 0 };
-	strftime(path, sizeof(path), "log-%m-%d.log", &local);
+	strftime(name, sizeof(name), "log-%m-%d.log", &local);
 	strftime(time, sizeof(time), "%H:%M:%S", &local);
 	char ms[8] = { 0 };
 	sprintf_s(ms, ".%03d", (int)chronoms.count());
 	strcat_s(time, ms);
+	// TODO: try to given default log directory from startup location
+	//       fopen return 2 if directory not exists
+	char path[512] = "./log/";
+	strcat_s(path, name);
+	// TODO: if we want to create directory which is not exists, can use filesystem from c++17,
+	//       otherwise marco for individual platform specific 
 
 	FILE *f;
 	errno_t err = fopen_s(&f, path, "a+");
