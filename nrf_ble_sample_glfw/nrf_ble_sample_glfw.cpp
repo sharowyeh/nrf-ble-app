@@ -32,9 +32,31 @@
 // widget status:
 static ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
-static bool check_state = false;
 static bool show_msg_window = false;
 static const char* msg_window_text = "";
+
+static bool show_auth_window = false;
+static const char* auth_window_text = "";
+static bool auth_bond_state = true;
+static bool auth_lesc_state = true;
+static bool auth_oob_state = false;
+static bool auth_mitm_state = false;
+static bool auth_keypress_state = false;
+// Allocate 8 but only 6 are used in library
+static char auth_passkey[8] = "123456";
+// BLE_GAP_IO_CAPS_XXXX
+static std::vector<const char*> auth_iocaps_list = {
+	"DISPLAY_ONLY",
+	"DISPLAY_YESNO",
+	"KEYBOARD_ONLY",
+	"NONE",
+	"KEYBOARD_DISPLAY"
+};
+static unsigned char auth_iocaps = 0x2;
+static const char* auth_iocaps_item = auth_iocaps_list[auth_iocaps];
+
+static bool auth_keydist_enc = true;
+static bool auth_keydist_id = false;
 
 static char serial_port[16] = "COM4";
 static int baud_rate = 1000000;
@@ -71,8 +93,10 @@ typedef struct _report_t {
 
 // enabled hid report characteristics for combo box
 static std::vector<report> report_items;
-static int report_selected = -1;
-static const char* report_item = NULL;
+static int write_report_selected = -1;
+static const char* write_report_item = NULL;
+static int read_report_selected = -1;
+static const char* read_report_item = NULL;
 
 #pragma endregion
 
@@ -210,8 +234,10 @@ void on_dev_service_enabled(uint16_t count)
 	uint16_t len = count;
 	report_char_list(handle_list, refs_list, &len);
 	// cleanup and ready to update UI dataset
-	report_item = NULL;
-	report_selected = -1;
+	write_report_item = NULL;
+	write_report_selected = -1;
+	read_report_item = NULL;
+	read_report_selected = -1;
 	report_items.clear();
 	char tmp[64] = { 0 };
 	for (int i = 0; i < len; i++) {
@@ -249,8 +275,10 @@ uint32_t on_dev_disconnected(uint8_t reason) {
 	device_item = "";
 
 	// cleanup report and ready to update UI dataset
-	report_item = NULL;
-	report_selected = -1;
+	write_report_item = NULL;
+	write_report_selected = -1;
+	read_report_item = NULL;
+	read_report_selected = -1;
 	report_items.clear();
 	conn_state = ACT_STATES::NONE;
 	return reason;
@@ -296,6 +324,55 @@ static void draw_msg_widget() {
 	ImGui::End();
 }
 
+static void draw_auth_widget() {
+	ImGui::Checkbox("Show auth params widget", &show_auth_window);
+
+	if (show_auth_window == false)
+		return;
+
+	ImGui::Begin("Auth Params Widget", &show_auth_window);
+
+	ImGui::Checkbox("Bond", &auth_bond_state);
+	ImGui::SameLine();
+	ImGui::Checkbox("LESC", &auth_lesc_state);
+	ImGui::SameLine();
+	ImGui::Checkbox("OOB", &auth_oob_state);
+
+	ImGui::Checkbox("MITM", &auth_mitm_state);
+	ImGui::SameLine();
+	ImGui::Checkbox("Keypress", &auth_keypress_state);
+
+	ImGui::Text("Passkey");
+	ImGui::SameLine();
+	ImGui::InputText("##passkey", auth_passkey, IM_ARRAYSIZE(auth_passkey));
+
+	ImGui::Text("IO Caps");
+	ImGui::SameLine();
+	if (ImGui::BeginCombo("##iocaps", auth_iocaps_item)) {
+		for (size_t i = 0; i < auth_iocaps_list.size(); i++) {
+			const bool is_selected = (i == auth_iocaps);
+			if (ImGui::Selectable(auth_iocaps_list[i], is_selected)) {
+				auth_iocaps = i;
+				auth_iocaps_item = auth_iocaps_list[i];
+			}
+
+			if (is_selected)
+				ImGui::SetItemDefaultFocus();
+		}
+		ImGui::EndCombo();
+	}
+
+	ImGui::Text("Keydist");
+	ImGui::SameLine();
+	ImGui::Checkbox("Enc", &auth_keydist_enc);
+	ImGui::SameLine();
+	ImGui::Checkbox("Id", &auth_keydist_id);
+
+	if (ImGui::Button("Close"))
+		show_auth_window = false;
+	ImGui::End();
+}
+
 static void draw_init_layout() {
 
 	ImGui::Text("Serial port");
@@ -325,8 +402,10 @@ static void draw_init_layout() {
 		device_item = "";
 
 		// cleanup report and ready to update UI dataset
-		report_item = NULL;
-		report_selected = -1;
+		write_report_item = NULL;
+		write_report_selected = -1;
+		read_report_item = NULL;
+		read_report_selected = -1;
 		report_items.clear();
 		init_state = ACT_STATES::NONE;
 	}
@@ -475,14 +554,14 @@ std::vector<std::string> split(std::string str, std::string delimiter) {
 
 static void draw_report_layout() {
 
-	ImGui::Text("Report Char: ");
+	ImGui::Text("Report write: ");
 	ImGui::SameLine();
-	if (ImGui::BeginCombo("##reportchar", report_item)) {
+	if (ImGui::BeginCombo("##reportwrite", write_report_item)) {
 		for (int i = 0; i < report_items.size(); i++) {
-			const bool is_selected = (report_selected == i);
+			const bool is_selected = (write_report_selected == i);
 			if (ImGui::Selectable(report_items[i].handle_str, report_items[i].label, is_selected)) {
-				report_selected = i;
-				report_item = report_items[i].label;
+				write_report_selected = i;
+				write_report_item = report_items[i].label;
 			}
 
 			if (is_selected)
@@ -492,7 +571,7 @@ static void draw_report_layout() {
 	}
 
 	if (ImGui::Button("Write")) {
-		if (report_selected == -1 || report_item == NULL || strlen(report_item) == 0) {
+		if (write_report_selected == -1 || write_report_item == NULL || strlen(write_report_item) == 0) {
 			msg_window_text = "No endpoint selected";
 			show_msg_window = true;
 		}
@@ -504,7 +583,7 @@ static void draw_report_layout() {
 				if (bytes != NULL) {
 					for (size_t i = 0; i < sp.size(); i++)
 						bytes[i] = strtoul(sp[i].c_str(), NULL, 16);
-					auto ble_code = data_write(report_items[report_selected].handle, bytes, sp.size(), 2000);
+					auto ble_code = data_write(report_items[write_report_selected].handle, bytes, sp.size(), 2000);
 				}
 			}
 		}
@@ -513,15 +592,31 @@ static void draw_report_layout() {
 	//TODO: try play with ImGuiInputTextFlags_CharsHexadecimal?
 	ImGui::InputText("##weitedata", write_data_str, IM_ARRAYSIZE(write_data_str));
 
+	ImGui::Text("Report read : ");
+	ImGui::SameLine();
+	if (ImGui::BeginCombo("##reportread", read_report_item)) {
+		for (int i = 0; i < report_items.size(); i++) {
+			const bool is_selected = (read_report_selected == i);
+			if (ImGui::Selectable(report_items[i].handle_str, report_items[i].label, is_selected)) {
+				read_report_selected = i;
+				read_report_item = report_items[i].label;
+			}
+
+			if (is_selected)
+				ImGui::SetItemDefaultFocus();
+		}
+		ImGui::EndCombo();
+	}
+
 	if (ImGui::Button("Read")) {
-		if (report_selected == -1 || report_item == NULL || strlen(report_item) == 0) {
+		if (read_report_selected == -1 || read_report_item == NULL || strlen(read_report_item) == 0) {
 			msg_window_text = "No endpoint selected";
 			show_msg_window = true;
 		}
 		else {
 			uint8_t bytes[256] = { 0 };
 			uint16_t len = 256;
-			auto ble_code = data_read(report_items[report_selected].handle, bytes, &len, 2000);
+			auto ble_code = data_read(report_items[read_report_selected].handle, bytes, &len, 2000);
 			if (ble_code == 0) {
 				for (int i = 0; i < len && i * 3 < 128; i++)
 					sprintf_s(&read_data_str[i * 3], 4, "%02x ", bytes[i]);
@@ -537,24 +632,17 @@ static void draw_main_widget() {
 	static int counter = 0;
 
 	ImGui::Begin("Yay", NULL, ImGuiWindowFlags_NoCollapse);                          // Create a window and append into it.
-
-	//ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
 	
 	draw_init_layout();
+	ImGui::Separator();
 	draw_scan_layout();
+	ImGui::Separator();
+	draw_auth_widget();
+	ImGui::Separator();
 	draw_conn_layout();
+	ImGui::Separator();
 	draw_report_layout();
 
-	//ImGui::Checkbox("Checkbox", &check_state);      // Edit bools storing our window open/close state
-	//ImGui::Checkbox("Message Window", &show_msg_window);
-
-	//ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
-	//ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
-
-	//if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
-	//	counter++;
-	//ImGui::SameLine();
-	//ImGui::Text("counter = %d", counter);
 
 	ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 	ImGui::End();
