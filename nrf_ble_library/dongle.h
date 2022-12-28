@@ -55,6 +55,8 @@ typedef void(*fn_on_data_sent)(uint16_t handle, uint8_t *data, uint16_t len);
 
 EXTERNC NRFBLEAPI uint32_t callback_add(fn_callback_id_t fn_id, void* fn);
 
+/*initialize uECC keypair from config file or create new one*/
+EXTERNC NRFBLEAPI uint32_t keypair_init(bool renew = false);
 /*serial_port:"COMx", baud_rate:10000*/
 EXTERNC NRFBLEAPI uint32_t dongle_init(char* serial_port, uint32_t baud_rate);
 /*interval:2.5~10240(ms), window:2.5~10240(ms), timeout:0(disable),1~65535(s)*/

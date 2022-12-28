@@ -94,6 +94,8 @@ static bool        m_is_connected = false; /* peripheral address has been connec
 static char        m_passkey[6] = { '1', '2', '3', '4', '5', '6' }; /* default fixed passkey for auth request(BLE_GAP_EVT_AUTH_KEY_REQUEST) */
 static bool	       m_is_authenticated = false; /* peripheral address has been authenticated(BLE_GAP_EVT_AUTH_STATUS) */
 static uint8_t     m_connected_devices = 0; /* number of connected devices */
+//TODO: may need something to save paired device?
+static ble_gap_addr_t m_adv_devices[16] = { 0 }; /* for advertising devices */
 static uint16_t    m_connection_handle = 0;
 static uint16_t    m_service_start_handle = 0;
 static uint16_t    m_service_end_handle = 0;
@@ -371,7 +373,8 @@ static void ble_address_to_uint64_convert(uint8_t addr[BLE_GAP_ADDR_LEN], uint64
 	}
 }
 
-static uint32_t convert_byte_string(char* byte_array, uint32_t len, char* str);
+/*forward declaration for bytes-string conversion*/
+static uint32_t convert_byte_string(uint8_t* byte_array, uint32_t len, char* str);
 
 /* func duplicated from adv_report_parse splitted advertising data by each types */
 static uint32_t adv_report_data_slice(const ble_gap_evt_adv_report_t* p_adv_report, std::map<uint8_t, data_t>* pp_type_data)
@@ -388,7 +391,7 @@ static uint32_t adv_report_data_slice(const ble_gap_evt_adv_report_t* p_adv_repo
 #endif
 
 	char log_data[256] = { 0 };
-	convert_byte_string((char*)adv_data.p_data, adv_data.len, log_data);
+	convert_byte_string(adv_data.p_data, adv_data.len, log_data);
 	log_level(LOG_TRACE, "Raw adv: %s", log_data);
 
 	uint32_t  index = 0;
@@ -521,12 +524,12 @@ static bool get_adv_name(const ble_gap_evt_adv_report_t *p_adv_report, char * na
 	return false;
 }
 
-static uint32_t convert_byte_string(char *byte_array, uint32_t len, char *str) {
+static uint32_t convert_byte_string(uint8_t *byte_array, uint32_t len, char *str) {
 	if (byte_array == NULL || str == NULL)
 		return 0;
 
 	uint32_t total_len = 0;
-	for (int i = 0; i < len; i++) {
+	for (size_t i = 0; i < len; i++) {
 		auto print_len = sprintf_s(str, 4, "%02x ", (unsigned char)byte_array[i]);
 		str += print_len;
 		total_len += print_len;
@@ -534,11 +537,27 @@ static uint32_t convert_byte_string(char *byte_array, uint32_t len, char *str) {
 	return total_len;
 }
 
-static void print_byte_string(char *byte_array, uint32_t len) {
+static uint32_t convert_string_byte(char *str, uint8_t *byte_array, uint32_t len) {
+	if (byte_array == NULL || str == NULL)
+		return 0;
+
+	char* nxt = NULL;
+	char* tok = strtok_s(str, " ", &nxt);
+	uint32_t pos = 0;
+	while (tok != NULL && pos < len) {
+		byte_array[pos] = strtoul(tok, NULL, 16);
+		pos++;
+		tok = strtok_s(NULL, " ", &nxt);
+	}
+	return pos;
+}
+
+static void print_byte_string(uint8_t*byte_array, uint32_t len) {
 	if (byte_array == NULL)
 		return;
-	for (int i = 0; i < len; i++) {
-		printf("%02x ", (unsigned char)byte_array[i]);
+
+	for (size_t i = 0; i < len; i++) {
+		printf("%02x ", byte_array[i]);
 	}
 	fflush(stdout);
 }
@@ -1246,7 +1265,7 @@ uint32_t data_read_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t *l
 		return NRF_ERROR_NOT_FOUND;
 	}
 	sprintf_s(m_log_msg, " Read value handle found: 0x%04X ref:", handle);
-	convert_byte_string((char *)report_ref, 2, &(m_log_msg[strlen(m_log_msg)]));
+	convert_byte_string(report_ref, 2, &(m_log_msg[strlen(m_log_msg)]));
 	log_level(LOG_INFO, m_log_msg);
 	return data_read(handle, data, len, timeout);
 }
@@ -1312,7 +1331,7 @@ uint32_t data_write_by_report_ref(uint8_t *report_ref, uint8_t *data, uint16_t l
 		return NRF_ERROR_NOT_FOUND;
 	}
 	sprintf_s(m_log_msg, " Write value handle found: 0x%04X ref:", handle);
-	convert_byte_string((char *)report_ref, 2, &(m_log_msg[strlen(m_log_msg)]));
+	convert_byte_string(report_ref, 2, &(m_log_msg[strlen(m_log_msg)]));
 	log_level(LOG_INFO, m_log_msg);
 	return data_write(handle, data, len, timeout);
 }
@@ -1545,7 +1564,10 @@ static void on_disconnected(const ble_gap_evt_t *const p_ble_gap_evt) {
 	log_level(LOG_INFO, "Disconnected, reason: 0x%02X",
 		p_ble_gap_evt->params.disconnected.reason);
 
-	m_connected_devices--;
+	//TODO:try advertising devices, use flags as array index?
+	if (m_connected_devices >= 16)
+		m_connected_devices = 0;
+	//m_connected_devices--;
 	connection_cleanup();
 
 	for (auto &fn : m_callback_fn_list[FN_ON_DISCONNECTED]) {
@@ -1842,7 +1864,7 @@ static void on_read_characteristic_values_response(const ble_gattc_evt_t *const 
 	//char read_bytes[DATA_BUFFER_SIZE] = { 0 };
 	//memcpy_s(&read_bytes[0], DATA_BUFFER_SIZE, p_data, len);
 	sprintf_s(m_log_msg, "Received read char vals len:%d data: ", len);
-	convert_byte_string((char *)p_data, len, &(m_log_msg[strlen(m_log_msg)]));
+	convert_byte_string(p_data, len, &(m_log_msg[strlen(m_log_msg)]));
 	log_level(LOG_DEBUG, m_log_msg);
 }
 
@@ -1868,7 +1890,7 @@ static void on_read_response(const ble_gattc_evt_t *const p_ble_gattc_evt)
 	uint16_t len = p_ble_gattc_evt->params.read_rsp.len;
 
 	sprintf_s(m_log_msg, "Received read response handle:0x%04X len:%d data: ", rsp_handle, len);
-	convert_byte_string((char *)p_data, len, &(m_log_msg[strlen(m_log_msg)]));
+	convert_byte_string(p_data, len, &(m_log_msg[strlen(m_log_msg)]));
 	log_level(LOG_DEBUG, m_log_msg);
 
 	// NOTICE: refer to on_characteristic_discovery_response has pre-allocated memory
@@ -1974,11 +1996,11 @@ static void on_hvx(const ble_gattc_evt_t * const p_ble_gattc_evt)
 	auto msg_pos = &(m_log_msg[strlen(m_log_msg)]);
 	if (m_char_list[char_idx].report_ref_is_read) {
 		msg_pos += sprintf_s(msg_pos, 5, "ref:");
-		msg_pos += convert_byte_string((char*)m_char_list[char_idx].report_ref, 2, msg_pos);
+		msg_pos += convert_byte_string(m_char_list[char_idx].report_ref, 2, msg_pos);
 	}
 
 	msg_pos += sprintf_s(msg_pos, 16, "len:%d data: ", len);
-	convert_byte_string((char*)p_data, len, msg_pos);
+	convert_byte_string((uint8_t*)p_data, len, msg_pos);
 	log_level(LOG_DEBUG, m_log_msg);
 
 	// NOTICE: refer to on_characteristic_discovery_response has pre-allocated memory
@@ -2049,7 +2071,7 @@ static void on_sec_params_request(const ble_gap_evt_t * const p_ble_gap_evt)
 
 	memcpy_s(m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, m_public_key, ECC_P256_PK_LEN);
 	sprintf_s(m_log_msg, " own_pk= ");
-	convert_byte_string((char*)m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, &m_log_msg[strlen(m_log_msg)]);
+	convert_byte_string(m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, &m_log_msg[strlen(m_log_msg)]);
 	log_level(LOG_DEBUG, m_log_msg);
 
 	ble_gap_sec_keyset_t sec_keyset = { 0 };
@@ -2116,7 +2138,7 @@ static void on_exchange_mtu_response(const ble_gattc_evt_t* const p_ble_gattc_ev
 /* NOTICE: dummy legacy oob data for debug
 * reference: https://devzone.nordicsemi.com/f/nordic-q-a/47932/oob-works-with-mcp-but-fails-with-nrf-connect
 */
-static char m_oob_debug[16] = { 0xAA, 0xBB, 0xCC, 0xDD,
+static uint8_t m_oob_debug[16] = { 0xAA, 0xBB, 0xCC, 0xDD,
 									  0xEE, 0xFF, 0x99, 0x88,
 									  0x77, 0x66, 0x55, 0x44,
 									  0x33, 0x22, 0x11, 0x00 };
@@ -2217,7 +2239,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 
 		// print peer pubkey
 		sprintf_s(m_log_msg, " peer_pk= ");
-		convert_byte_string((char*)p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.p_pk_peer->pk,
+		convert_byte_string(p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.p_pk_peer->pk,
 			BLE_GAP_LESC_P256_PK_LEN, &m_log_msg[strlen(m_log_msg)]);
 		log_level(LOG_DEBUG, m_log_msg);
 		// valid peer pubkey
@@ -2228,7 +2250,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		ble_gap_lesc_dhkey_t dhkey = { 0 };
 		ecc_p256_compute_sharedsecret(m_private_key, p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.p_pk_peer->pk, dhkey.key);
 		sprintf_s(m_log_msg, " compute ss= ");
-		convert_byte_string((char*)dhkey.key, BLE_GAP_LESC_DHKEY_LEN, &m_log_msg[strlen(m_log_msg)]);
+		convert_byte_string(dhkey.key, BLE_GAP_LESC_DHKEY_LEN, &m_log_msg[strlen(m_log_msg)]);
 		log_level(LOG_DEBUG, m_log_msg);
 
 		// sd_ble_gap_lesc_dhkey_reply: reply shared
@@ -2243,13 +2265,13 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 		log_level(LOG_TRACE, " oob_get: %d", err_code);
 
 		sprintf_s(m_log_msg, "  pk_own= ");
-		convert_byte_string((char*)pk_own.pk, BLE_GAP_LESC_P256_PK_LEN, &m_log_msg[strlen(m_log_msg)]);
+		convert_byte_string(pk_own.pk, BLE_GAP_LESC_P256_PK_LEN, &m_log_msg[strlen(m_log_msg)]);
 		log_level(LOG_TRACE, m_log_msg);
 		sprintf_s(m_log_msg, "  oob_own.random= ");
-		convert_byte_string((char*)oob_own.r, BLE_GAP_SEC_KEY_LEN, &m_log_msg[strlen(m_log_msg)]);
+		convert_byte_string(oob_own.r, BLE_GAP_SEC_KEY_LEN, &m_log_msg[strlen(m_log_msg)]);
 		log_level(LOG_TRACE, m_log_msg);
 		sprintf_s(m_log_msg, "  oob_own.confirm= ");
-		convert_byte_string((char*)oob_own.c, BLE_GAP_SEC_KEY_LEN, &m_log_msg[strlen(m_log_msg)]);
+		convert_byte_string(oob_own.c, BLE_GAP_SEC_KEY_LEN, &m_log_msg[strlen(m_log_msg)]);
 		log_level(LOG_TRACE, m_log_msg);
 
 		if (p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.oobd_req == 0)
@@ -2274,7 +2296,7 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 			//TODO: DEBUG: currently hardcode oob data provided from peripheral for behavior debug
 			//  originally requirement is for Windows swift pair
 
-			key = (uint8_t*)&m_oob_debug[0];
+			key = &m_oob_debug[0];
 			sprintf_s(m_log_msg, " on auth key req by OOB: ");
 			convert_byte_string(m_oob_debug, 16, &m_log_msg[strlen(m_log_msg)]);
 			log_level(LOG_DEBUG, m_log_msg);
@@ -2625,6 +2647,65 @@ uint32_t callback_add(fn_callback_id_t fn_id, void* fn) {
 	return 0;
 }
 
+uint32_t keypair_init(bool renew)
+{
+	char log_sk[ECC_P256_SK_LEN * 4] = { 0 };
+	char log_pk[ECC_P256_PK_LEN * 4] = { 0 };
+	int ecc_res = 0;
+
+	FILE* f;
+	errno_t err = fopen_s(&f, "nrf_ble_library.cfg", "r");
+	if (err != 0 || f == 0) {
+		renew = true;
+	}
+	else {
+		fgets(log_sk, sizeof(log_sk), f);
+		fgets(log_pk, sizeof(log_pk), f);
+		// remove trailing newline 
+		log_sk[strcspn(log_sk, "\r\n")] = 0;
+		log_pk[strcspn(log_pk, "\r\n")] = 0;
+		log_level(LOG_TRACE, "cfg prvkey: %s", log_sk);
+		log_level(LOG_TRACE, "cfg pubkey: %s", log_pk);
+		convert_string_byte(log_sk, m_private_key, ECC_P256_SK_LEN);
+		convert_string_byte(log_pk, m_public_key, ECC_P256_PK_LEN);
+		fclose(f);
+
+		log_level(LOG_DEBUG, "uECC key pair restored");
+	}
+
+	if (renew) {
+		memset(m_private_key, 0, ECC_P256_SK_LEN);
+		memset(m_public_key, 0, ECC_P256_PK_LEN);
+		ecc_res = ecc_p256_gen_keypair(m_private_key, m_public_key);
+		// log key pair
+		convert_byte_string(m_private_key, ECC_P256_SK_LEN, log_sk);
+		convert_byte_string(m_public_key, ECC_P256_PK_LEN, log_pk);
+		log_level(LOG_TRACE, "uECC prvkey: %s", log_sk);
+		log_level(LOG_TRACE, "uECC pubkey: %s", log_pk);
+
+		// for debug, simple get a new public key and check it
+		uint8_t test_pubkey[ECC_P256_PK_LEN] = { 0 };
+		ecc_res = ecc_p256_compute_pubkey(m_private_key, test_pubkey);
+		// validate pubkey
+		ecc_res = ecc_p256_valid_public_key(test_pubkey);
+		log_level(LOG_TRACE, "check test pub key:%d == 1, sk[0]:0x%02x, pk[0]:0x%02x", ecc_res, m_private_key[0], test_pubkey[0]);
+
+		err = fopen_s(&f, "nrf_ble_library.cfg", "w");
+		if (err == 0 && f != 0) {
+			fprintf(f, "%s\n", log_sk);
+			fprintf(f, "%s\n", log_pk);
+			fclose(f);
+			log_level(LOG_DEBUG, "uECC key pair stored");
+		}
+	}
+
+	// validate pubkey
+	ecc_res = ecc_p256_valid_public_key(m_public_key);
+	log_level(LOG_INFO, "uECC check key pair: %d should be 1, sk[0]:0x%02x, pk[0]:0x%02x", ecc_res, m_private_key[0], m_public_key[0]);
+
+	return 0;
+}
+
 /* init Nordic connectiviy dongle and register event for rpc*/
 uint32_t dongle_init(char* serial_port, uint32_t baud_rate)
 {
@@ -2636,12 +2717,15 @@ uint32_t dongle_init(char* serial_port, uint32_t baud_rate)
 
 	// init ecc and generate keypair for later usage?
 	ecc_init();
-	int ecc_res = ecc_p256_gen_keypair(m_private_key, m_public_key);
-	uint8_t test_pubkey[ECC_P256_PK_LEN] = { 0 };
-	ecc_res = ecc_p256_compute_pubkey(m_private_key, test_pubkey);
-	// validate pubkey
-	ecc_res = ecc_p256_valid_public_key(test_pubkey);
-	log_level(LOG_DEBUG, "uECC check key pair: %d should be 1", ecc_res);
+
+	// get new keypair or from config
+	keypair_init();
+	//int ecc_res = ecc_p256_gen_keypair(m_private_key, m_public_key);
+	//uint8_t test_pubkey[ECC_P256_PK_LEN] = { 0 };
+	//ecc_res = ecc_p256_compute_pubkey(m_private_key, test_pubkey);
+	//// validate pubkey
+	//ecc_res = ecc_p256_valid_public_key(test_pubkey);
+	//log_level(LOG_DEBUG, "uECC check key pair: %d should be 1", ecc_res);
 
 	uint32_t error_code;
 	uint8_t  cccd_value = 0;
