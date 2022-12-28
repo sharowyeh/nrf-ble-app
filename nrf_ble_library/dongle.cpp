@@ -94,8 +94,6 @@ static bool        m_is_connected = false; /* peripheral address has been connec
 static char        m_passkey[6] = { '1', '2', '3', '4', '5', '6' }; /* default fixed passkey for auth request(BLE_GAP_EVT_AUTH_KEY_REQUEST) */
 static bool	       m_is_authenticated = false; /* peripheral address has been authenticated(BLE_GAP_EVT_AUTH_STATUS) */
 static uint8_t     m_connected_devices = 0; /* number of connected devices */
-//TODO: may need something to save paired device?
-static ble_gap_addr_t m_adv_devices[16] = { 0 }; /* for advertising devices */
 static uint16_t    m_connection_handle = 0;
 static uint16_t    m_service_start_handle = 0;
 static uint16_t    m_service_end_handle = 0;
@@ -110,12 +108,17 @@ static std::map<fn_callback_id_t, std::vector<void*>> m_callback_fn_list;
 
 /* Advertising data */
 typedef struct _adv_data_t {
-	ble_gap_evt_adv_report_t adv_report;
+	ble_gap_evt_adv_report_t adv_report; /*adv report as device identity*/
 	std::map<uint8_t, data_t> type_data_list; /*BLE_GAP_AD_TYPE_DEFINITIONS, data*/
+	uint8_t own_pk[ECC_P256_PK_LEN] = { 0 }; //TODO: let pubkey for individual peer, sec_param_req, lesc_dhkey_req 
+	uint8_t peer_pk[ECC_P256_PK_LEN] = { 0 };
 } adv_data_t;
 
 /* Advertising data key pair by address */
-static std::map<uint64_t, adv_data_t> m_adv_list; /*addr, report*/
+static std::map<uint64_t, adv_data_t> m_adv_list; /*addr, adv data*/
+
+//TODO: let pubkey for individual peer, store addr+pubkey in file?
+static std::map<uint64_t, adv_data_t> m_pair_list; /*addr, adv data*/
 
 /* Discovered characteristic data structure */
 typedef struct _dev_char_t {
@@ -225,6 +228,7 @@ static ble_gap_sec_params_t m_sec_params =
 
 // key pair for security params update, refer to security.h/cpp, duplicated from pc-ble-driver-js\src\driver_uecc.cpp
 static uint8_t m_private_key[ECC_P256_SK_LEN] = { 0 };
+//TODO: let pubkey for individual peer
 static uint8_t m_public_key[ECC_P256_PK_LEN] = { 0 };
 
 // keyset data for LE security authentication
@@ -2058,8 +2062,9 @@ static void on_conn_params_update(const ble_gap_evt_t * const p_ble_gap_evt)
 		error_code, conn_sec.sec_mode.sm, conn_sec.sec_mode.lv);
 }
 
-/*
-request security parameters for peripheral authentication
+/* 
+from ble_evt_dispatch() BLE_GAP_EVT_SEC_PARAMS_REQUEST event received.
+reply security parameters with owner public key for peripheral authentication.
 */
 static void on_sec_params_request(const ble_gap_evt_t * const p_ble_gap_evt)
 {
@@ -2069,7 +2074,7 @@ static void on_sec_params_request(const ble_gap_evt_t * const p_ble_gap_evt)
 		peer_params.bond, peer_params.io_caps,
 		peer_params.min_key_size, peer_params.max_key_size,
 		peer_params.kdist_own.enc, peer_params.kdist_peer.enc);
-
+	//TODO: let pubkey for individual peer
 	memcpy_s(m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, m_public_key, ECC_P256_PK_LEN);
 	sprintf_s(m_log_msg, " own_pk= ");
 	convert_byte_string(m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, &m_log_msg[strlen(m_log_msg)]);
@@ -2088,6 +2093,103 @@ static void on_sec_params_request(const ble_gap_evt_t * const p_ble_gap_evt)
 	uint32_t err_code = sd_ble_gap_sec_params_reply(
 		m_adapter, m_connection_handle, BLE_GAP_SEC_STATUS_SUCCESS, 0, &sec_keyset);
 	log_level(LOG_DEBUG, " on security params request, return=%d should be %d", err_code, NRF_SUCCESS);
+}
+
+/*
+from ble_evt_dispatch() BLE_GAP_EVT_AUTH_STATUS event received.
+check authentication state and notify to caller
+*/
+static void on_auth_status(const ble_gap_evt_t * const p_ble_gap_evt)
+{	
+	log_level(LOG_DEBUG, " on auth status, status=%d, bond=%d",
+		p_ble_gap_evt->params.auth_status.auth_status,
+		p_ble_gap_evt->params.auth_status.bonded);
+
+	// check auth status and bonded by given security parameter
+	// NOTICE: w/o bond may not have enough privilege interacting most services
+	if (p_ble_gap_evt->params.auth_status.auth_status == BLE_GAP_SEC_STATUS_SUCCESS &&
+		p_ble_gap_evt->params.auth_status.bonded | ~m_sec_params.bond) {
+
+		m_is_authenticated = true;
+
+		m_cond_find.notify_all();
+
+		// NOTICE: let caller decide the next action, can wait util conn param updated to discover service
+		//         or do immediately after authentication completed
+		for (auto& fn : m_callback_fn_list[FN_ON_AUTHENTICATED]) {
+			((fn_on_authenticated)fn)(p_ble_gap_evt->params.auth_status.auth_status);
+		}
+	}
+	else if (m_callback_fn_list[FN_ON_FAILED].size() > 0) {
+		std::string str = std::string("auth failed: " +
+			std::to_string(p_ble_gap_evt->params.auth_status.auth_status));
+		for (auto& fn : m_callback_fn_list[FN_ON_FAILED]) {
+			((fn_on_failed)fn)(str.c_str());
+		}
+	}
+	else {
+		// nothing to do
+	}
+}
+
+/*
+from ble_evt_dispatch() BLE_GAP_EVT_LESC_DHKEY_REQUEST event received.
+reply shared secret for LESC and OOB
+*/
+static void on_lesc_dhkey_request(const ble_gap_evt_t * const p_ble_gap_evt)
+{
+	auto lesc_request = p_ble_gap_evt->params.lesc_dhkey_request;
+
+	// if sd_ble_gap_authenticate lesc = 1
+	log_level(LOG_DEBUG, " on lesc dhkey request, oobd_req=%d, peer_pk0=%d",
+		lesc_request.oobd_req,
+		lesc_request.p_pk_peer->pk[0]);
+
+	// print peer pubkey
+	sprintf_s(m_log_msg, " peer_pk= ");
+	convert_byte_string(lesc_request.p_pk_peer->pk,
+		BLE_GAP_LESC_P256_PK_LEN, &m_log_msg[strlen(m_log_msg)]);
+	log_level(LOG_DEBUG, m_log_msg);
+	// valid peer pubkey
+	int ecc_res = ecc_p256_valid_public_key(lesc_request.p_pk_peer->pk);
+	log_level(LOG_DEBUG, " peer_pk valid=%d should be 1", ecc_res);
+
+	// compute share secret from peer pk
+	ble_gap_lesc_dhkey_t dhkey = { 0 };
+	ecc_p256_compute_sharedsecret(m_private_key, lesc_request.p_pk_peer->pk, dhkey.key);
+	sprintf_s(m_log_msg, " compute ss= ");
+	convert_byte_string(dhkey.key, BLE_GAP_LESC_DHKEY_LEN, &m_log_msg[strlen(m_log_msg)]);
+	log_level(LOG_DEBUG, m_log_msg);
+
+	// sd_ble_gap_lesc_dhkey_reply: reply shared
+	uint32_t err_code = sd_ble_gap_lesc_dhkey_reply(m_adapter, m_connection_handle, &dhkey);
+	log_level(LOG_DEBUG, " reply dhkey: %d", err_code);
+
+	// sd_ble_gap_lesc_oob_data_get: get own oob
+	//TODO: let pubkey for individual peer
+	ble_gap_lesc_p256_pk_t pk_own = { 0 };
+	memcpy_s(pk_own.pk, ECC_P256_PK_LEN, m_public_key, ECC_P256_PK_LEN);
+	ble_gap_lesc_oob_data_t oob_own = { 0 };
+	err_code = sd_ble_gap_lesc_oob_data_get(m_adapter, m_connection_handle, &pk_own, &oob_own);
+	log_level(LOG_TRACE, " oob_get: %d", err_code);
+
+	sprintf_s(m_log_msg, "  pk_own= ");
+	convert_byte_string(pk_own.pk, BLE_GAP_LESC_P256_PK_LEN, &m_log_msg[strlen(m_log_msg)]);
+	log_level(LOG_TRACE, m_log_msg);
+	sprintf_s(m_log_msg, "  oob_own.random= ");
+	convert_byte_string(oob_own.r, BLE_GAP_SEC_KEY_LEN, &m_log_msg[strlen(m_log_msg)]);
+	log_level(LOG_TRACE, m_log_msg);
+	sprintf_s(m_log_msg, "  oob_own.confirm= ");
+	convert_byte_string(oob_own.c, BLE_GAP_SEC_KEY_LEN, &m_log_msg[strlen(m_log_msg)]);
+	log_level(LOG_TRACE, m_log_msg);
+
+	if (lesc_request.oobd_req == 0)
+		return;
+
+	// sd_ble_gap_lesc_oob_data_set: set own oob, peer oob
+	ble_gap_lesc_oob_data_t oob_peer = { 0 }; // TODO: input required
+	err_code = sd_ble_gap_lesc_oob_data_set(m_adapter, m_connection_handle, &oob_own, &oob_peer);
+	log_level(LOG_DEBUG, " oob_set: %d", err_code);
 }
 
 
@@ -2185,7 +2287,12 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 
 	case BLE_GAP_EVT_SEC_REQUEST:
 	{
-		log_level(LOG_TRACE, "on sec request");
+		// code for peripheral...
+		log_level(LOG_TRACE, "on sec request, lesc=%d bond=%d mitm=%d keypress=%d",
+			p_ble_evt->evt.gap_evt.params.sec_request.lesc,
+			p_ble_evt->evt.gap_evt.params.sec_request.bond,
+			p_ble_evt->evt.gap_evt.params.sec_request.mitm,
+			p_ble_evt->evt.gap_evt.params.sec_request.keypress);
 	}break;
 
 	case BLE_GAP_EVT_SEC_PARAMS_REQUEST:
@@ -2201,87 +2308,15 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 
 	case BLE_GAP_EVT_AUTH_STATUS:
 	{
-		log_level(LOG_DEBUG, " on auth status, status=%d, bond=%d",
-			p_ble_evt->evt.gap_evt.params.auth_status.auth_status,
-			p_ble_evt->evt.gap_evt.params.auth_status.bonded);
-
-		// check auth status and bonded by given security parameter
-		// NOTICE: w/o bond may not have enough privilege interacting most services
-		if (p_ble_evt->evt.gap_evt.params.auth_status.auth_status == BLE_GAP_SEC_STATUS_SUCCESS &&
-			p_ble_evt->evt.gap_evt.params.auth_status.bonded | ~m_sec_params.bond) {
-			
-			m_is_authenticated = true;
-
-			m_cond_find.notify_all();
-			
-			// NOTICE: let caller decide the next action, can wait util conn param updated to discover service
-			//         or do immediately after authentication completed
-			for (auto &fn : m_callback_fn_list[FN_ON_AUTHENTICATED]) {
-				((fn_on_authenticated)fn)(p_ble_evt->evt.gap_evt.params.auth_status.auth_status);
-			}
-		}
-		else {
-			if (m_callback_fn_list[FN_ON_FAILED].size() > 0) {
-				std::string str = std::string("auth failed: " +
-					std::to_string(p_ble_evt->evt.gap_evt.params.auth_status.auth_status));
-				for (auto &fn : m_callback_fn_list[FN_ON_FAILED]) {
-					((fn_on_failed)fn)(str.c_str());
-				}
-			}
-		}
+		// notify caller whether auth completed or failed
+		on_auth_status(&(p_ble_evt->evt.gap_evt));
 	}break;
 
 	case BLE_GAP_EVT_LESC_DHKEY_REQUEST:
 	{
-		// if sd_ble_gap_authenticate lesc = 1
-		log_level(LOG_DEBUG, " on lesc dhkey request, oobd_req=%d, peer_pk0=%d",
-			p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.oobd_req,
-			p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.p_pk_peer->pk[0]);
-
-		// print peer pubkey
-		sprintf_s(m_log_msg, " peer_pk= ");
-		convert_byte_string(p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.p_pk_peer->pk,
-			BLE_GAP_LESC_P256_PK_LEN, &m_log_msg[strlen(m_log_msg)]);
-		log_level(LOG_DEBUG, m_log_msg);
-		// valid peer pubkey
-		int ecc_res = ecc_p256_valid_public_key(p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.p_pk_peer->pk);
-		log_level(LOG_DEBUG, " peer_pk valid=%d should be 1", ecc_res);
-
-		// compute share secret from peer pk
-		ble_gap_lesc_dhkey_t dhkey = { 0 };
-		ecc_p256_compute_sharedsecret(m_private_key, p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.p_pk_peer->pk, dhkey.key);
-		sprintf_s(m_log_msg, " compute ss= ");
-		convert_byte_string(dhkey.key, BLE_GAP_LESC_DHKEY_LEN, &m_log_msg[strlen(m_log_msg)]);
-		log_level(LOG_DEBUG, m_log_msg);
-
-		// sd_ble_gap_lesc_dhkey_reply: reply shared
-		err_code = sd_ble_gap_lesc_dhkey_reply(m_adapter, m_connection_handle, &dhkey);
-		log_level(LOG_DEBUG, " reply dhkey: %d", err_code);
-		
-		// sd_ble_gap_lesc_oob_data_get: get own oob
-		ble_gap_lesc_p256_pk_t pk_own = { 0 };
-		memcpy_s(pk_own.pk, ECC_P256_PK_LEN, m_public_key, ECC_P256_PK_LEN);
-		ble_gap_lesc_oob_data_t oob_own = { 0 };
-		err_code = sd_ble_gap_lesc_oob_data_get(m_adapter, m_connection_handle, &pk_own, &oob_own);
-		log_level(LOG_TRACE, " oob_get: %d", err_code);
-
-		sprintf_s(m_log_msg, "  pk_own= ");
-		convert_byte_string(pk_own.pk, BLE_GAP_LESC_P256_PK_LEN, &m_log_msg[strlen(m_log_msg)]);
-		log_level(LOG_TRACE, m_log_msg);
-		sprintf_s(m_log_msg, "  oob_own.random= ");
-		convert_byte_string(oob_own.r, BLE_GAP_SEC_KEY_LEN, &m_log_msg[strlen(m_log_msg)]);
-		log_level(LOG_TRACE, m_log_msg);
-		sprintf_s(m_log_msg, "  oob_own.confirm= ");
-		convert_byte_string(oob_own.c, BLE_GAP_SEC_KEY_LEN, &m_log_msg[strlen(m_log_msg)]);
-		log_level(LOG_TRACE, m_log_msg);
-
-		if (p_ble_evt->evt.gap_evt.params.lesc_dhkey_request.oobd_req == 0)
-			break;
-
-		// sd_ble_gap_lesc_oob_data_set: set own oob, peer oob
-		ble_gap_lesc_oob_data_t oob_peer = { 0 }; // TODO: input required
-		err_code = sd_ble_gap_lesc_oob_data_set(m_adapter, m_connection_handle, &oob_own, &oob_peer);
-		log_level(LOG_DEBUG, " oob_set: %d", err_code);
+		// compute shared secret from owner/peer public key
+		// DEBUG: not enough samples for OOB debugging
+		on_lesc_dhkey_request(&(p_ble_evt->evt.gap_evt));
 	}break;
 
 	case BLE_GAP_EVT_AUTH_KEY_REQUEST:
@@ -2302,14 +2337,16 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 			convert_byte_string(m_oob_debug, 16, &m_log_msg[strlen(m_log_msg)]);
 			log_level(LOG_DEBUG, m_log_msg);
 		}
+		else if (key_type == BLE_GAP_AUTH_KEY_TYPE_NONE) {
+			log_level(LOG_DEBUG, " no auth key required");
+		}
+		// follow up peer's design, reply the same key_type to peer
 		err_code = sd_ble_gap_auth_key_reply(m_adapter, m_connection_handle, key_type, key);
 		log_level(LOG_DEBUG, " on auth key req, keytype:%d return:%d", key_type, err_code);
-		
-		// only notify to caller which auth via passkey
-		if (key_type != BLE_GAP_AUTH_KEY_TYPE_PASSKEY)
-			break;
 
-		if (m_callback_fn_list[FN_ON_PASSKEY_REQUIRED].size() > 0) {
+		// only notify to caller which auth via passkey, duplicated behavior while BLE_GAP_EVT_PASSKEY_DISPLAY event received
+		if (key_type == BLE_GAP_AUTH_KEY_TYPE_PASSKEY &&
+			m_callback_fn_list[FN_ON_PASSKEY_REQUIRED].size() > 0) {
 			std::string str = std::string(m_passkey);
 			for (auto &fn : m_callback_fn_list[FN_ON_PASSKEY_REQUIRED]) {
 				((fn_on_passkey_required)fn)(str.c_str());
