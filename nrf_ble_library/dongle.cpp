@@ -352,7 +352,7 @@ static void status_handler(adapter_t * adapter, sd_rpc_app_status_t code, const 
  * @param[in] address       Bluetooth Low Energy address.
  * @param[out] string_buffer The serial port the target nRF5 device is connected to.
  */
-static void ble_address_to_string_convert(ble_gap_addr_t address, uint8_t * string_buffer)
+static void convert_ble_address_to_string(ble_gap_addr_t address, uint8_t * string_buffer)
 {
 	const int address_length = BLE_GAP_ADDR_LEN;
 	char      temp_str[3] = { 0 };
@@ -365,7 +365,7 @@ static void ble_address_to_string_convert(ble_gap_addr_t address, uint8_t * stri
 	}
 }
 
-static void ble_address_to_uint64_convert(uint8_t addr[BLE_GAP_ADDR_LEN], uint64_t *number)
+static void convert_ble_address_to_uint64(uint8_t addr[BLE_GAP_ADDR_LEN], uint64_t *number)
 {
 	for (int i = BLE_GAP_ADDR_LEN - 1; i >= 0; --i)
 	{
@@ -376,8 +376,8 @@ static void ble_address_to_uint64_convert(uint8_t addr[BLE_GAP_ADDR_LEN], uint64
 /*forward declaration for bytes-string conversion*/
 static uint32_t convert_byte_string(uint8_t* byte_array, uint32_t len, char* str);
 
-/* func duplicated from adv_report_parse splitted advertising data by each types */
-static uint32_t adv_report_data_slice(const ble_gap_evt_adv_report_t* p_adv_report, std::map<uint8_t, data_t>* pp_type_data)
+/* func duplicated from parse_adv_report splitted advertising data by each AD types */
+static uint32_t parse_adv_report_data(const ble_gap_evt_adv_report_t* p_adv_report, std::map<uint8_t, data_t>* pp_type_data)
 {
 	ble_data_t   adv_data;
 
@@ -451,7 +451,7 @@ static bool get_adv_name(std::map<uint8_t, data_t>* pp_type_data, char* name)
  * @retval NRF_SUCCESS if the data type is found in the report.
  * @retval NRF_ERROR_NOT_FOUND if the data type could not be found.
  */
-static uint32_t adv_report_parse(uint8_t type, ble_data_t * p_advdata, ble_data_t* p_typedata)
+static uint32_t parse_adv_report(uint8_t type, ble_data_t * p_advdata, ble_data_t* p_typedata)
 {
 	uint32_t  index = 0;
 	uint8_t * p_data;
@@ -491,7 +491,7 @@ static bool get_adv_name(const ble_gap_evt_adv_report_t *p_adv_report, char * na
 #endif
 
 	//search for advertising names
-	err_code = adv_report_parse(BLE_GAP_AD_TYPE_COMPLETE_LOCAL_NAME,
+	err_code = parse_adv_report(BLE_GAP_AD_TYPE_COMPLETE_LOCAL_NAME,
 		&adv_data,
 		&dev_name);
 	if (err_code == NRF_SUCCESS)
@@ -501,7 +501,7 @@ static bool get_adv_name(const ble_gap_evt_adv_report_t *p_adv_report, char * na
 	}
 
 	// Look for the short local name if it was not found as complete
-	err_code = adv_report_parse(BLE_GAP_AD_TYPE_SHORT_LOCAL_NAME,
+	err_code = parse_adv_report(BLE_GAP_AD_TYPE_SHORT_LOCAL_NAME,
 		&adv_data,
 		&dev_name);
 	if (err_code == NRF_SUCCESS)
@@ -510,7 +510,8 @@ static bool get_adv_name(const ble_gap_evt_adv_report_t *p_adv_report, char * na
 		return true;
 	}
 
-	//NOTICE: only get readable ascii, otherwise refer to adv_report_data_slice()
+	//NOTICE: only get readable ascii, otherwise refer to parse_adv_report_data(), which
+	//        device may support AD data extension without fixed data size from later BLE protocol version
 	//// Look for the manufacturing data if it was not found as complete
 	//err_code = adv_report_parse(BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA,
 	//	&adv_data,
@@ -1094,7 +1095,7 @@ uint32_t device_find(uint8_t addr[6], int8_t rssi, const char* passkey, uint16_t
 				continue;
 			if (addr != NULL) {
 				uint64_t addr_num = 0;
-				ble_address_to_uint64_convert(addr, &addr_num);
+				convert_ble_address_to_uint64(addr, &addr_num);
 				if (target->first == addr_num) {
 					break;
 				}
@@ -1400,7 +1401,7 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 
 	uint64_t addr_num = 0;
 	if (near) {
-		ble_address_to_uint64_convert((uint8_t*)p_ble_gap_evt->params.adv_report.peer_addr.addr, &addr_num);
+		convert_ble_address_to_uint64((uint8_t*)p_ble_gap_evt->params.adv_report.peer_addr.addr, &addr_num);
 
 		// adv list always up-to-date
 		bool arrival = (m_adv_list.find(addr_num) == m_adv_list.end());
@@ -1412,7 +1413,7 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 		}
 		//m_adv_list.insert_or_assign(addr_num, p_ble_gap_evt->params.adv_report);
 
-		adv_report_data_slice(&p_ble_gap_evt->params.adv_report, &m_adv_list[addr_num].type_data_list);
+		parse_adv_report_data(&p_ble_gap_evt->params.adv_report, &m_adv_list[addr_num].type_data_list);
 		log_level(LOG_TRACE, "Scan addr:%llx parsed advertising data list:%lu", addr_num, m_adv_list[addr_num].type_data_list.size());
 	} // end of if(near)
 	
@@ -1422,7 +1423,7 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 	if (near && update)
 	{
 		// Log the Bluetooth device address of advertisement packet received.
-		ble_address_to_string_convert(p_ble_gap_evt->params.adv_report.peer_addr, str);
+		convert_ble_address_to_string(p_ble_gap_evt->params.adv_report.peer_addr, str);
 
 		char name[256] = { 0 };
 		// Just get name from m_adv_list[].type_data_list[]
@@ -1431,7 +1432,7 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 
 #if NRF_SD_BLE_API >= 6
 		uint8_t  str2[STRING_BUFFER_SIZE] = { 0 };
-		ble_address_to_string_convert(p_ble_gap_evt->params.adv_report.direct_addr, str2);
+		convert_ble_address_to_string(p_ble_gap_evt->params.adv_report.direct_addr, str2);
 		log_level(LOG_DEBUG, "Received adv report peer:0x%s direct:0x%s rssi:%d type:%d name:%s\r\n \
 chidx:%d dataid:%d priphy:%d setid:%d txpwr:%d auxoff:%d auxphy:%d",
 			str, str2,
