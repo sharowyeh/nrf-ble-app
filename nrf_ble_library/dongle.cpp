@@ -110,15 +110,22 @@ static std::map<fn_callback_id_t, std::vector<void*>> m_callback_fn_list;
 typedef struct _adv_data_t {
 	ble_gap_evt_adv_report_t adv_report; /*adv report as device identity*/
 	std::map<uint8_t, data_t> type_data_list; /*BLE_GAP_AD_TYPE_DEFINITIONS, data*/
-	uint8_t own_pk[ECC_P256_PK_LEN] = { 0 }; //TODO: let pubkey for individual peer, sec_param_req, lesc_dhkey_req 
-	uint8_t peer_pk[ECC_P256_PK_LEN] = { 0 };
 } adv_data_t;
 
 /* Advertising data key pair by address */
 static std::map<uint64_t, adv_data_t> m_adv_list; /*addr, adv data*/
 
-//TODO: let pubkey for individual peer, store addr+pubkey in file?
-static std::map<uint64_t, adv_data_t> m_pair_list; /*addr, adv data*/
+/* Paired device data */
+typedef struct _pair_data_t {
+	ble_gap_evt_adv_report_t adv_report; /*adv report as device identity*/
+	uint8_t own_pk[ECC_P256_PK_LEN] = { 0 }; //TODO: error gets the same pubkey from uecc
+	uint8_t peer_pk[ECC_P256_PK_LEN] = { 0 };
+	bool is_paired = false;
+} pair_data_t;
+
+static uint64_t m_pair_addr_num = 0;
+// store pair data for individual peer
+static std::map<uint64_t, pair_data_t> m_pair_list; /*addr, dev data*/
 
 /* Discovered characteristic data structure */
 typedef struct _dev_char_t {
@@ -229,7 +236,7 @@ static ble_gap_sec_params_t m_sec_params =
 
 // key pair for security params update, refer to security.h/cpp, duplicated from pc-ble-driver-js\src\driver_uecc.cpp
 static uint8_t m_private_key[ECC_P256_SK_LEN] = { 0 };
-//TODO: let pubkey for individual peer
+//TODO: keep it or using m_pair_list?
 static uint8_t m_public_key[ECC_P256_PK_LEN] = { 0 };
 
 // keyset data for LE security authentication
@@ -674,6 +681,40 @@ static void connection_cleanup() {
 	m_cond_find.notify_all();
 }
 
+static void store_pair_data(uint64_t addr_num) {
+	char name[128] = { 0 };
+	sprintf_s(name, "nrf_ble_library_%llx.mpk", addr_num);
+	FILE* f;
+	errno_t err;
+	err = fopen_s(&f, name, "wb");
+	if (err || f == NULL)
+		return;
+	fwrite(m_pair_list[addr_num].own_pk, sizeof(uint8_t), ECC_P256_PK_LEN, f);
+	fwrite(m_pair_list[addr_num].peer_pk, sizeof(uint8_t), ECC_P256_PK_LEN, f);
+	fclose(f);
+}
+
+// overload
+static void store_pair_data(uint8_t addr[6]) {
+	uint64_t addr_num = 0;
+	convert_ble_address_to_uint64(addr, &addr_num);
+	store_pair_data(addr_num);
+}
+
+static bool read_pair_data(uint64_t addr_num) {
+	char name[128] = { 0 };
+	sprintf_s(name, "nrf_ble_library_%llx.mpk", addr_num);
+	FILE* f;
+	errno_t err;
+	err = fopen_s(&f, name, "rb");
+	if (err || f == NULL)
+		return false;
+	fread(m_pair_list[addr_num].own_pk, sizeof(uint8_t), ECC_P256_PK_LEN, f);
+	fread(m_pair_list[addr_num].peer_pk, sizeof(uint8_t), ECC_P256_PK_LEN, f);
+	fclose(f);
+	return true;
+}
+
 #pragma endregion
 
 
@@ -763,6 +804,19 @@ uint32_t conn_start(uint8_t addr_type, uint8_t addr[6])
 	/*sd_ble_gap_connect(m_adapter, &(m_connected_addr), &m_scan_param, &m_connection_param, BLE_CONN_CFG_TAG_DEFAULT);
 	ble_gap_adv_params_t adv_param = { 0 };
 	sd_ble_gap_adv_start(m_adapter, NULL, m_config_id);*/
+
+	// get or create data struct to follow up pairing sequences
+	uint64_t addr_num = 0;
+	convert_ble_address_to_uint64(addr, &addr_num);
+	pair_data_t data = { 0 };
+	m_pair_list.insert_or_assign(addr_num, data);
+	memcpy_s(&m_pair_list[addr_num].adv_report, sizeof(ble_gap_evt_adv_report_t),
+		&m_adv_list[addr_num].adv_report, sizeof(ble_gap_evt_adv_report_t));
+	// assign to unpair
+	m_pair_list[addr_num].is_paired = false;
+	read_pair_data(addr_num);
+	m_pair_addr_num = addr_num;
+	log_level(LOG_DEBUG, "Pair addr:%llx assign to the map, size=%lu", addr_num, m_pair_list.size());
 
 	uint32_t err_code;
 	err_code = sd_ble_gap_connect(m_adapter,
@@ -2080,8 +2134,15 @@ static void on_sec_params_request(const ble_gap_evt_t * const p_ble_gap_evt)
 		peer_params.bond, peer_params.io_caps,
 		peer_params.min_key_size, peer_params.max_key_size,
 		peer_params.kdist_own.enc, peer_params.kdist_peer.enc);
-	//TODO: let pubkey for individual peer
-	memcpy_s(m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, m_public_key, ECC_P256_PK_LEN);
+
+	// use stored pk for individual peer, invalid(not 1) if unset or private key changed
+	if (ecc_p256_valid_public_key(m_pair_list[m_pair_addr_num].own_pk) != 1) {
+		auto ecc_res = ecc_p256_compute_pubkey(m_private_key, m_pair_list[m_pair_addr_num].own_pk);
+		log_level(LOG_DEBUG, " on security params request, gen own pk which is empty or invalid");
+		store_pair_data(m_pair_list[m_pair_addr_num].adv_report.peer_addr.addr);
+	}
+	memcpy_s(m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, m_pair_list[m_pair_addr_num].own_pk, ECC_P256_PK_LEN);
+	//memcpy_s(m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, m_public_key, ECC_P256_PK_LEN);
 	sprintf_s(m_log_msg, " own_pk= ");
 	convert_byte_string(m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, &m_log_msg[strlen(m_log_msg)]);
 	log_level(LOG_DEBUG, m_log_msg);
@@ -2159,6 +2220,11 @@ static void on_lesc_dhkey_request(const ble_gap_evt_t * const p_ble_gap_evt)
 	// valid peer pubkey
 	int ecc_res = ecc_p256_valid_public_key(lesc_request.p_pk_peer->pk);
 	log_level(LOG_DEBUG, " peer_pk valid=%d should be 1", ecc_res);
+	if (ecc_res == 1) {
+		memcpy_s(m_pair_list[m_pair_addr_num].peer_pk, ECC_P256_PK_LEN, lesc_request.p_pk_peer->pk, BLE_GAP_LESC_P256_PK_LEN);
+		log_level(LOG_DEBUG, " on lesc dhkey request, store peer pk");
+		store_pair_data(m_pair_list[m_pair_addr_num].adv_report.peer_addr.addr);
+	}
 
 	// compute share secret from peer pk
 	ble_gap_lesc_dhkey_t dhkey = { 0 };
@@ -2172,9 +2238,15 @@ static void on_lesc_dhkey_request(const ble_gap_evt_t * const p_ble_gap_evt)
 	log_level(LOG_DEBUG, " reply dhkey: %d", err_code);
 
 	// sd_ble_gap_lesc_oob_data_get: get own oob
-	//TODO: let pubkey for individual peer
 	ble_gap_lesc_p256_pk_t pk_own = { 0 };
-	memcpy_s(pk_own.pk, ECC_P256_PK_LEN, m_public_key, ECC_P256_PK_LEN);
+	// use stored pk for individual peer, invalid(not 1) if unset or private key changed
+	if (ecc_p256_valid_public_key(m_pair_list[m_pair_addr_num].own_pk) != 1) {
+		auto ecc_res = ecc_p256_compute_pubkey(m_private_key, m_pair_list[m_pair_addr_num].own_pk);
+		log_level(LOG_DEBUG, " on lesc dhkey request, gen own pk which is empty or invalid");
+		store_pair_data(m_pair_list[m_pair_addr_num].adv_report.peer_addr.addr);
+	}
+	memcpy_s(m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, m_pair_list[m_pair_addr_num].own_pk, ECC_P256_PK_LEN);
+	//memcpy_s(pk_own.pk, ECC_P256_PK_LEN, m_public_key, ECC_P256_PK_LEN);
 	ble_gap_lesc_oob_data_t oob_own = { 0 };
 	err_code = sd_ble_gap_lesc_oob_data_get(m_adapter, m_connection_handle, &pk_own, &oob_own);
 	log_level(LOG_TRACE, " oob_get: %d", err_code);
