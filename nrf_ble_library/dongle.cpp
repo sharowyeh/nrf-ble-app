@@ -1569,10 +1569,7 @@ static void on_disconnected(const ble_gap_evt_t *const p_ble_gap_evt) {
 	log_level(LOG_INFO, "Disconnected, reason: 0x%02X",
 		p_ble_gap_evt->params.disconnected.reason);
 
-	//TODO:try advertising devices, use flags as array index?
-	if (m_connected_devices >= 16)
-		m_connected_devices = 0;
-	//m_connected_devices--;
+	m_connected_devices--;
 	connection_cleanup();
 
 	for (auto &fn : m_callback_fn_list[FN_ON_DISCONNECTED]) {
@@ -2692,20 +2689,25 @@ uint32_t keypair_init(bool renew)
 	int ecc_res = 0;
 
 	FILE* f;
-	errno_t err = fopen_s(&f, "nrf_ble_library.cfg", "r");
+	errno_t err;
+	//err = fopen_s(&f, "nrf_ble_library.cfg", "r");
+	err = fopen_s(&f, "nrf_ble_library.spk", "rb");
 	if (err != 0 || f == 0) {
 		renew = true;
 	}
 	else {
-		fgets(log_sk, sizeof(log_sk), f);
-		fgets(log_pk, sizeof(log_pk), f);
-		// remove trailing newline 
-		log_sk[strcspn(log_sk, "\r\n")] = 0;
-		log_pk[strcspn(log_pk, "\r\n")] = 0;
-		log_level(LOG_TRACE, "cfg prvkey: %s", log_sk);
-		log_level(LOG_TRACE, "cfg pubkey: %s", log_pk);
-		convert_string_byte(log_sk, m_private_key, ECC_P256_SK_LEN);
-		convert_string_byte(log_pk, m_public_key, ECC_P256_PK_LEN);
+		// use binary data, TODO: add salt hash
+		fread(m_private_key, sizeof(uint8_t), ECC_P256_SK_LEN, f);
+		fread(m_public_key, sizeof(uint8_t), ECC_P256_PK_LEN, f);
+		//fgets(log_sk, sizeof(log_sk), f);
+		//fgets(log_pk, sizeof(log_pk), f);
+		//// remove trailing newline 
+		//log_sk[strcspn(log_sk, "\r\n")] = 0;
+		//log_pk[strcspn(log_pk, "\r\n")] = 0;
+		//log_level(LOG_TRACE, "cfg prvkey: %s", log_sk);
+		//log_level(LOG_TRACE, "cfg pubkey: %s", log_pk);
+		//convert_string_byte(log_sk, m_private_key, ECC_P256_SK_LEN);
+		//convert_string_byte(log_pk, m_public_key, ECC_P256_PK_LEN);
 		fclose(f);
 
 		log_level(LOG_DEBUG, "uECC key pair restored");
@@ -2728,13 +2730,21 @@ uint32_t keypair_init(bool renew)
 		ecc_res = ecc_p256_valid_public_key(test_pubkey);
 		log_level(LOG_TRACE, "check test pub key:%d == 1, sk[0]:0x%02x, pk[0]:0x%02x", ecc_res, m_private_key[0], test_pubkey[0]);
 
-		err = fopen_s(&f, "nrf_ble_library.cfg", "w");
+		// use binary data, TODO: add salt hash
+		err = fopen_s(&f, "nrf_ble_library.spk", "wb");
+		if (err == 0 && f != 0) {
+			fwrite(m_private_key, sizeof(uint8_t), ECC_P256_SK_LEN, f);
+			fwrite(m_public_key, sizeof(uint8_t), ECC_P256_PK_LEN, f);
+			fclose(f);
+			log_level(LOG_DEBUG, "uECC key pair stored (bin)");
+		}
+		/*err = fopen_s(&f, "nrf_ble_library.cfg", "w");
 		if (err == 0 && f != 0) {
 			fprintf(f, "%s\n", log_sk);
 			fprintf(f, "%s\n", log_pk);
 			fclose(f);
-			log_level(LOG_DEBUG, "uECC key pair stored");
-		}
+			log_level(LOG_DEBUG, "uECC key pair stored (txt)");
+		}*/
 	}
 
 	// validate pubkey
@@ -2756,14 +2766,10 @@ uint32_t dongle_init(char* serial_port, uint32_t baud_rate)
 	// init ecc and generate keypair for later usage?
 	ecc_init();
 
-	// get new keypair or from config
+	// get new keypair or from file store
 	keypair_init();
-	//int ecc_res = ecc_p256_gen_keypair(m_private_key, m_public_key);
-	//uint8_t test_pubkey[ECC_P256_PK_LEN] = { 0 };
-	//ecc_res = ecc_p256_compute_pubkey(m_private_key, test_pubkey);
-	//// validate pubkey
-	//ecc_res = ecc_p256_valid_public_key(test_pubkey);
-	//log_level(LOG_DEBUG, "uECC check key pair: %d should be 1", ecc_res);
+
+
 
 	uint32_t error_code;
 	uint8_t  cccd_value = 0;
