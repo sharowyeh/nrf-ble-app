@@ -69,6 +69,8 @@ typedef enum {
 static ACT_STATES init_state = ACT_STATES::NONE;
 static ACT_STATES scan_state = ACT_STATES::NONE;
 
+static bool renew_keypair = false;
+
 typedef struct _device_t {
 	std::string addr_str;
 	std::string name;
@@ -382,7 +384,7 @@ static void draw_init_layout() {
 	ImGui::PushItemWidth(100);
 	ImGui::InputText("##serialport", serial_port, IM_ARRAYSIZE(serial_port));
 
-	ImGui::Text("Baud rate");
+	ImGui::Text("Baud rate  ");
 	ImGui::SameLine();
 	ImGui::InputInt("##baudrate", &baud_rate, 1, 100);
 	ImGui::PopItemWidth();
@@ -429,6 +431,21 @@ static void draw_init_layout() {
 		break;
 	default:
 		break;
+	}
+
+	if (ImGui::Button("Renew kaypair")) {
+		keypair_init(true);
+		renew_keypair = true;
+	}
+	ImGui::SameLine();
+	if (init_state == ACT_STATES::SUCCESS) {
+		if (renew_keypair == false)
+			ImGui::Text("Note: key store will be changed");
+		else
+			ImGui::Text("renew ok");
+	}
+	else {
+		ImGui::Text("init required");
 	}
 }
 
@@ -482,7 +499,7 @@ static void draw_conn_layout() {
 	ImGui::InputInt8("##rssi", &target_rssi, 1, 5);
 	ImGui::PopItemWidth();
 
-	ImGui::Text("Discovered: ");
+	ImGui::Text("Discovered:   ");
 	ImGui::SameLine();
 	if (ImGui::BeginCombo("##discovered", device_item)) {
 		for (int i = 0; i < device_items.size(); i++) {
@@ -594,7 +611,7 @@ static void draw_report_layout() {
 	//TODO: try play with ImGuiInputTextFlags_CharsHexadecimal?
 	ImGui::InputText("##weitedata", write_data_str, IM_ARRAYSIZE(write_data_str));
 
-	ImGui::Text("Report read : ");
+	ImGui::Text("Report read:  ");
 	ImGui::SameLine();
 	if (ImGui::BeginCombo("##reportread", read_report_item)) {
 		for (int i = 0; i < report_items.size(); i++) {

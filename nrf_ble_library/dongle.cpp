@@ -146,7 +146,8 @@ static std::map<uint16_t, data_t> m_write_data; /* handle, p_data, data_len */
 static char m_log_msg[4096] = { 0 };
 #ifdef _DEBUG
 static log_level_t m_log_level = LOG_DEBUG;
-//static log_level_t m_log_level = LOG_TRACE;
+#elif defined _TRACE
+static log_level_t m_log_level = LOG_TRACE;
 #else
 static log_level_t m_log_level = LOG_INFO;
 #endif
@@ -1459,10 +1460,11 @@ chidx:%d dataid:%d priphy:%d setid:%d txpwr:%d auxoff:%d auxphy:%d",
 			m_adv_list[addr_num].type_data_list.size(),
 			name);
 
-		if (p_ble_gap_evt->params.adv_report.scan_rsp == 0 /*||
-			p_ble_gap_evt->params.adv_report.type != BLE_GAP_ADV_TYPE_ADV_IND*/) {
+		// not restrict the advertising report for re-connection from authenticated device
+		/*if (p_ble_gap_evt->params.adv_report.scan_rsp == 0
+			p_ble_gap_evt->params.adv_report.type != BLE_GAP_ADV_TYPE_ADV_IND) {
 			return;
-		}
+		}*/
 #endif
 
 		// flag to invoke caller callback for further connection establish
@@ -1804,12 +1806,19 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 		// move to find descriptors of the next characteristic
 		descr_discovery_start(m_char_list[++m_char_idx].handle_range);
 	}
-	else {
+	else if (m_discovered_handle < m_service_end_handle) {
 		// move to find rest of characteristics
 		ble_gattc_handle_range_t range{ m_discovered_handle, m_service_end_handle };
 		char_discovery_start(range);
 	}
+	else {
+		m_cond_find.notify_all();
 
+		// invoke callback to caller when service dicovery ended
+		for (auto& fn : m_callback_fn_list[FN_ON_SERVICE_DISCOVERED]) {
+			((fn_on_service_discovered)fn)(m_service_start_handle, m_char_list.size());
+		}
+	}
 }
 
 
@@ -2233,8 +2242,8 @@ static void on_exchange_mtu_response(const ble_gattc_evt_t* const p_ble_gattc_ev
 
 #pragma endregion
 
-//TODO: DEDBUG: currently hardcode oob data provided from peripheral for behavior debug
-//  originally requirement is for Windows swift pair
+//TODO: DEDBUG: dummy oob data hardcoded in peripheral for behavior debugging
+//  for vendor's out of band TK exchange, likes MSFT swift pair
 /* NOTICE: dummy legacy oob data for debug
 * reference: https://devzone.nordicsemi.com/f/nordic-q-a/47932/oob-works-with-mcp-but-fails-with-nrf-connect
 */
@@ -2326,9 +2335,8 @@ static void ble_evt_dispatch(adapter_t * adapter, ble_evt_t * p_ble_evt)
 			log_level(LOG_INFO, " use %s for passkey", m_passkey);
 		}
 		else if (key_type == BLE_GAP_AUTH_KEY_TYPE_OOB) {
-			//TODO: DEBUG: currently hardcode oob data provided from peripheral for behavior debug
-			//  originally requirement is for Windows swift pair
-
+			//TODO: DEDBUG: dummy oob data hardcoded in peripheral for behavior debugging
+			//  for vendor's out of band TK exchange, likes MSFT swift pair
 			key = &m_oob_debug[0];
 			sprintf_s(m_log_msg, " on auth key req by OOB: ");
 			convert_byte_string(m_oob_debug, 16, &m_log_msg[strlen(m_log_msg)]);
