@@ -76,8 +76,10 @@ namespace NrfBLESampleWinform
             //NrfBLELibrary.ScanStart(200, 50, true, 0);
 
             comboBoxDiscovered.SelectedIndexChanged += ComboBoxDiscovered_SelectedIndexChanged;
+            comboBoxDiscovered.SelectedValueChanged += ComboBoxDiscovered_SelectedIndexChanged;
             
             buttonDongleInit.Click += ButtonDongleInit_Click;
+            buttonRenewKeypair.Click += ButtonRenewKeypair_Click;
             buttonScanStart.Click += ButtonScanStart_Click;
             buttonScanStop.Click += ButtonScanStop_Click;
             buttonConnect.Click += ButtonConnect_Click;
@@ -97,11 +99,17 @@ namespace NrfBLESampleWinform
         private void ComboBoxDiscovered_SelectedIndexChanged(object sender, EventArgs e)
         {
             if (comboBoxDiscovered.SelectedIndex == -1)
+            {
+                targetDevice = null;
                 return;
+            }
 
-            targetDevice = comboBoxDiscovered.SelectedItem as AdvertisingData;
-            if (targetDevice != null)
+            var selected = comboBoxDiscovered.SelectedItem as AdvertisingData;
+            if (targetDevice == null || targetDevice.AddrString != selected.AddrString)
+            {
+                targetDevice = selected;
                 WriteLog($"target {targetDevice.AddrString} selected");
+            }
         }
 
         private void ButtonDongleInit_Click(object sender, EventArgs e)
@@ -110,6 +118,17 @@ namespace NrfBLESampleWinform
             uint baudrate = uint.Parse(textBoxBaudRate.Text);
             var code = NrfBLELibrary.DongleInit(textBoxSerialPort.Text, baudrate);
             WriteLog($"dongle init {(code == 0 ? "ok" : "fail")} code:{code}");
+        }
+
+        private void ButtonRenewKeypair_Click(object sender, EventArgs e)
+        {
+            var result = MessageBox.Show("key store will be changed, ok or cancel?", "keypair init", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
+            if (result != DialogResult.OK)
+                return;
+
+            WriteLog("renew keypair, wait...");
+            NrfBLELibrary.KeypairInit(true);
+            WriteLog("keypair updated, check .spk binary");
         }
 
         private void ButtonScanStart_Click(object sender, EventArgs e)

@@ -77,6 +77,9 @@ namespace NrfBLESampleWinform
         [DllImport("nrf_ble_library.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi, EntryPoint = "dongle_init")]
         public static extern uint DongleInit(string serialPort, uint baudRate);
 
+        [DllImport("nrf_ble_library.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi, EntryPoint = "keypair_init")]
+        public static extern uint KeypairInit(bool renew);
+
         [DllImport("nrf_ble_library.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi, EntryPoint = "scan_start")]
         public static extern uint ScanStart(float interval, float window, bool active, ushort timeout);
 

@@ -65,6 +65,7 @@
             this.comboBoxIoCaps = new System.Windows.Forms.ComboBox();
             this.label10 = new System.Windows.Forms.Label();
             this.textBoxPasskey = new System.Windows.Forms.TextBox();
+            this.buttonRenewKeypair = new System.Windows.Forms.Button();
             this.SuspendLayout();
             // 
             // textBoxLog
@@ -74,7 +75,7 @@
             this.textBoxLog.Name = "textBoxLog";
             this.textBoxLog.ReadOnly = true;
             this.textBoxLog.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.textBoxLog.Size = new System.Drawing.Size(550, 345);
+            this.textBoxLog.Size = new System.Drawing.Size(550, 376);
             this.textBoxLog.TabIndex = 0;
             // 
             // textBoxSerialPort
@@ -122,7 +123,7 @@
             // 
             // textBoxRssi
             // 
-            this.textBoxRssi.Location = new System.Drawing.Point(96, 133);
+            this.textBoxRssi.Location = new System.Drawing.Point(96, 164);
             this.textBoxRssi.Name = "textBoxRssi";
             this.textBoxRssi.Size = new System.Drawing.Size(120, 24);
             this.textBoxRssi.TabIndex = 7;
@@ -130,7 +131,7 @@
             // 
             // textBoxAddress
             // 
-            this.textBoxAddress.Location = new System.Drawing.Point(96, 103);
+            this.textBoxAddress.Location = new System.Drawing.Point(96, 134);
             this.textBoxAddress.Name = "textBoxAddress";
             this.textBoxAddress.Size = new System.Drawing.Size(120, 24);
             this.textBoxAddress.TabIndex = 6;
@@ -139,7 +140,7 @@
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(12, 106);
+            this.label3.Location = new System.Drawing.Point(12, 137);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(52, 17);
             this.label3.TabIndex = 9;
@@ -148,7 +149,7 @@
             // label4
             // 
             this.label4.AutoSize = true;
-            this.label4.Location = new System.Drawing.Point(12, 136);
+            this.label4.Location = new System.Drawing.Point(12, 167);
             this.label4.Name = "label4";
             this.label4.Size = new System.Drawing.Size(29, 17);
             this.label4.TabIndex = 8;
@@ -156,7 +157,7 @@
             // 
             // buttonScanStart
             // 
-            this.buttonScanStart.Location = new System.Drawing.Point(96, 163);
+            this.buttonScanStart.Location = new System.Drawing.Point(96, 194);
             this.buttonScanStart.Name = "buttonScanStart";
             this.buttonScanStart.Size = new System.Drawing.Size(120, 25);
             this.buttonScanStart.TabIndex = 10;
@@ -198,7 +199,7 @@
             // 
             // buttonDisconnect
             // 
-            this.buttonDisconnect.Location = new System.Drawing.Point(96, 393);
+            this.buttonDisconnect.Location = new System.Drawing.Point(96, 424);
             this.buttonDisconnect.Name = "buttonDisconnect";
             this.buttonDisconnect.Size = new System.Drawing.Size(120, 25);
             this.buttonDisconnect.TabIndex = 17;
@@ -207,7 +208,7 @@
             // 
             // buttonDongleReset
             // 
-            this.buttonDongleReset.Location = new System.Drawing.Point(96, 424);
+            this.buttonDongleReset.Location = new System.Drawing.Point(96, 455);
             this.buttonDongleReset.Name = "buttonDongleReset";
             this.buttonDongleReset.Size = new System.Drawing.Size(120, 25);
             this.buttonDongleReset.TabIndex = 18;
@@ -260,7 +261,7 @@
             // 
             // buttonScanStop
             // 
-            this.buttonScanStop.Location = new System.Drawing.Point(96, 194);
+            this.buttonScanStop.Location = new System.Drawing.Point(96, 225);
             this.buttonScanStop.Name = "buttonScanStop";
             this.buttonScanStop.Size = new System.Drawing.Size(120, 25);
             this.buttonScanStop.TabIndex = 25;
@@ -272,7 +273,7 @@
             this.checkBoxLesc.AutoSize = true;
             this.checkBoxLesc.Checked = true;
             this.checkBoxLesc.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.checkBoxLesc.Location = new System.Drawing.Point(155, 233);
+            this.checkBoxLesc.Location = new System.Drawing.Point(155, 264);
             this.checkBoxLesc.Name = "checkBoxLesc";
             this.checkBoxLesc.Size = new System.Drawing.Size(53, 21);
             this.checkBoxLesc.TabIndex = 26;
@@ -282,7 +283,7 @@
             // checkBoxOob
             // 
             this.checkBoxOob.AutoSize = true;
-            this.checkBoxOob.Location = new System.Drawing.Point(96, 252);
+            this.checkBoxOob.Location = new System.Drawing.Point(96, 283);
             this.checkBoxOob.Name = "checkBoxOob";
             this.checkBoxOob.Size = new System.Drawing.Size(53, 21);
             this.checkBoxOob.TabIndex = 27;
@@ -292,7 +293,7 @@
             // checkBoxMitm
             // 
             this.checkBoxMitm.AutoSize = true;
-            this.checkBoxMitm.Location = new System.Drawing.Point(155, 252);
+            this.checkBoxMitm.Location = new System.Drawing.Point(155, 283);
             this.checkBoxMitm.Name = "checkBoxMitm";
             this.checkBoxMitm.Size = new System.Drawing.Size(62, 21);
             this.checkBoxMitm.TabIndex = 28;
@@ -302,7 +303,7 @@
             // checkBoxKeypress
             // 
             this.checkBoxKeypress.AutoSize = true;
-            this.checkBoxKeypress.Location = new System.Drawing.Point(96, 271);
+            this.checkBoxKeypress.Location = new System.Drawing.Point(96, 302);
             this.checkBoxKeypress.Name = "checkBoxKeypress";
             this.checkBoxKeypress.Size = new System.Drawing.Size(76, 21);
             this.checkBoxKeypress.TabIndex = 29;
@@ -312,7 +313,7 @@
             // checkBoxKdistId
             // 
             this.checkBoxKdistId.AutoSize = true;
-            this.checkBoxKdistId.Location = new System.Drawing.Point(155, 355);
+            this.checkBoxKdistId.Location = new System.Drawing.Point(155, 386);
             this.checkBoxKdistId.Name = "checkBoxKdistId";
             this.checkBoxKdistId.Size = new System.Drawing.Size(38, 21);
             this.checkBoxKdistId.TabIndex = 31;
@@ -324,7 +325,7 @@
             this.checkBoxKdistEnc.AutoSize = true;
             this.checkBoxKdistEnc.Checked = true;
             this.checkBoxKdistEnc.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.checkBoxKdistEnc.Location = new System.Drawing.Point(96, 355);
+            this.checkBoxKdistEnc.Location = new System.Drawing.Point(96, 386);
             this.checkBoxKdistEnc.Name = "checkBoxKdistEnc";
             this.checkBoxKdistEnc.Size = new System.Drawing.Size(47, 21);
             this.checkBoxKdistEnc.TabIndex = 30;
@@ -334,7 +335,7 @@
             // label7
             // 
             this.label7.AutoSize = true;
-            this.label7.Location = new System.Drawing.Point(12, 234);
+            this.label7.Location = new System.Drawing.Point(12, 265);
             this.label7.Name = "label7";
             this.label7.Size = new System.Drawing.Size(35, 17);
             this.label7.TabIndex = 32;
@@ -343,7 +344,7 @@
             // label8
             // 
             this.label8.AutoSize = true;
-            this.label8.Location = new System.Drawing.Point(12, 355);
+            this.label8.Location = new System.Drawing.Point(12, 386);
             this.label8.Name = "label8";
             this.label8.Size = new System.Drawing.Size(73, 34);
             this.label8.TabIndex = 33;
@@ -371,7 +372,7 @@
             this.checkBoxBond.AutoSize = true;
             this.checkBoxBond.Checked = true;
             this.checkBoxBond.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.checkBoxBond.Location = new System.Drawing.Point(96, 233);
+            this.checkBoxBond.Location = new System.Drawing.Point(96, 264);
             this.checkBoxBond.Name = "checkBoxBond";
             this.checkBoxBond.Size = new System.Drawing.Size(56, 21);
             this.checkBoxBond.TabIndex = 36;
@@ -381,7 +382,7 @@
             // comboBoxIoCaps
             // 
             this.comboBoxIoCaps.FormattingEnabled = true;
-            this.comboBoxIoCaps.Location = new System.Drawing.Point(96, 324);
+            this.comboBoxIoCaps.Location = new System.Drawing.Point(96, 355);
             this.comboBoxIoCaps.Name = "comboBoxIoCaps";
             this.comboBoxIoCaps.Size = new System.Drawing.Size(120, 25);
             this.comboBoxIoCaps.TabIndex = 37;
@@ -389,7 +390,7 @@
             // label10
             // 
             this.label10.AutoSize = true;
-            this.label10.Location = new System.Drawing.Point(12, 284);
+            this.label10.Location = new System.Drawing.Point(12, 315);
             this.label10.Name = "label10";
             this.label10.Size = new System.Drawing.Size(56, 34);
             this.label10.TabIndex = 39;
@@ -397,16 +398,26 @@
             // 
             // textBoxPasskey
             // 
-            this.textBoxPasskey.Location = new System.Drawing.Point(96, 294);
+            this.textBoxPasskey.Location = new System.Drawing.Point(96, 325);
             this.textBoxPasskey.Name = "textBoxPasskey";
             this.textBoxPasskey.Size = new System.Drawing.Size(120, 24);
             this.textBoxPasskey.TabIndex = 38;
             this.textBoxPasskey.Text = "123456";
             // 
+            // buttonRenewKeypair
+            // 
+            this.buttonRenewKeypair.Location = new System.Drawing.Point(96, 103);
+            this.buttonRenewKeypair.Name = "buttonRenewKeypair";
+            this.buttonRenewKeypair.Size = new System.Drawing.Size(120, 25);
+            this.buttonRenewKeypair.TabIndex = 40;
+            this.buttonRenewKeypair.Text = "Renew keypair";
+            this.buttonRenewKeypair.UseVisualStyleBackColor = true;
+            // 
             // Form1
             // 
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.None;
-            this.ClientSize = new System.Drawing.Size(784, 461);
+            this.ClientSize = new System.Drawing.Size(784, 491);
+            this.Controls.Add(this.buttonRenewKeypair);
             this.Controls.Add(this.label10);
             this.Controls.Add(this.textBoxPasskey);
             this.Controls.Add(this.comboBoxIoCaps);
@@ -491,6 +502,7 @@
         private System.Windows.Forms.ComboBox comboBoxIoCaps;
         private System.Windows.Forms.Label label10;
         private System.Windows.Forms.TextBox textBoxPasskey;
+        private System.Windows.Forms.Button buttonRenewKeypair;
     }
 }
 
