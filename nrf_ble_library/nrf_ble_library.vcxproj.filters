@@ -67,5 +67,17 @@
     <None Include="uECC\platform-specific.inc">
       <Filter>uECC</Filter>
     </None>
+    <None Include="uECC\asm_arm_mult_square.inc">
+      <Filter>uECC</Filter>
+    </None>
+    <None Include="uECC\asm_arm_mult_square_umaal.inc">
+      <Filter>uECC</Filter>
+    </None>
+    <None Include="uECC\asm_avr.inc">
+      <Filter>uECC</Filter>
+    </None>
+    <None Include="uECC\asm_avr_mult_square.inc">
+      <Filter>uECC</Filter>
+    </None>
   </ItemGroup>
 </Project>
