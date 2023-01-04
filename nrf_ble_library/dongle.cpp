@@ -149,12 +149,12 @@ static uint32_t m_char_idx = 0; // discover procedure index
 static std::map <uint16_t, data_t> m_read_data; /* handle, p_data, data_len */
 /* Data buffer to write */
 static std::map<uint16_t, data_t> m_write_data; /* handle, p_data, data_len */
-
+#define _TRACE
 static char m_log_msg[4096] = { 0 };
-#ifdef _DEBUG
-static log_level_t m_log_level = LOG_DEBUG;
-#elif defined _TRACE
+#ifdef _TRACE
 static log_level_t m_log_level = LOG_TRACE;
+#elif defined _DEBUG
+static log_level_t m_log_level = LOG_DEBUG;
 #else
 static log_level_t m_log_level = LOG_INFO;
 #endif
@@ -2137,8 +2137,10 @@ static void on_sec_params_request(const ble_gap_evt_t * const p_ble_gap_evt)
 
 	// use stored pk for individual peer, invalid(not 1) if unset or private key changed
 	if (ecc_p256_valid_public_key(m_pair_list[m_pair_addr_num].own_pk) != 1) {
+		//TODO: DEBUG: for current uecc algo, always got the same public key from the same private key
 		auto ecc_res = ecc_p256_compute_pubkey(m_private_key, m_pair_list[m_pair_addr_num].own_pk);
-		log_level(LOG_DEBUG, " on security params request, gen own pk which is empty or invalid");
+		log_level(LOG_DEBUG, " on security params request, gen %llx own pk %02x %02x.. which is empty or invalid",
+			m_pair_addr_num, m_pair_list[m_pair_addr_num].own_pk[0], m_pair_list[m_pair_addr_num].own_pk[1]);
 		store_pair_data(m_pair_list[m_pair_addr_num].adv_report.peer_addr.addr);
 	}
 	memcpy_s(m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, m_pair_list[m_pair_addr_num].own_pk, ECC_P256_PK_LEN);
@@ -2242,7 +2244,8 @@ static void on_lesc_dhkey_request(const ble_gap_evt_t * const p_ble_gap_evt)
 	// use stored pk for individual peer, invalid(not 1) if unset or private key changed
 	if (ecc_p256_valid_public_key(m_pair_list[m_pair_addr_num].own_pk) != 1) {
 		auto ecc_res = ecc_p256_compute_pubkey(m_private_key, m_pair_list[m_pair_addr_num].own_pk);
-		log_level(LOG_DEBUG, " on lesc dhkey request, gen own pk which is empty or invalid");
+		log_level(LOG_DEBUG, " on lesc dhkey request, gen %llx own pk %02x %02x.. which is empty or invalid",
+			m_pair_addr_num, m_pair_list[m_pair_addr_num].own_pk[0], m_pair_list[m_pair_addr_num].own_pk[1]);
 		store_pair_data(m_pair_list[m_pair_addr_num].adv_report.peer_addr.addr);
 	}
 	memcpy_s(m_own_pk.pk, BLE_GAP_LESC_P256_PK_LEN, m_pair_list[m_pair_addr_num].own_pk, ECC_P256_PK_LEN);
@@ -2848,8 +2851,6 @@ uint32_t dongle_init(char* serial_port, uint32_t baud_rate)
 
 	// get new keypair or from file store
 	keypair_init();
-
-
 
 	uint32_t error_code;
 	uint8_t  cccd_value = 0;
