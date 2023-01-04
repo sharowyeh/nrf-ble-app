@@ -189,6 +189,10 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="uECC\asm_arm.inc" />
+    <None Include="uECC\asm_arm_mult_square.inc" />
+    <None Include="uECC\asm_arm_mult_square_umaal.inc" />
+    <None Include="uECC\asm_avr.inc" />
+    <None Include="uECC\asm_avr_mult_square.inc" />
     <None Include="uECC\curve-specific.inc" />
     <None Include="uECC\platform-specific.inc" />
   </ItemGroup>
