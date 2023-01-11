@@ -402,6 +402,11 @@ static uint32_t parse_adv_report_data(const ble_gap_evt_adv_report_t* p_adv_repo
 	adv_data.len = p_adv_report->dlen;
 #endif
 
+	if (adv_data.p_data == NULL || adv_data.len == 0) {
+		log_level(LOG_TRACE, "Raw adv is empty");
+		return NRF_SUCCESS;
+	}
+
 	char log_data[256] = { 0 };
 	convert_byte_string(adv_data.p_data, adv_data.len, log_data);
 	log_level(LOG_TRACE, "Raw adv: %s", log_data);
@@ -420,13 +425,16 @@ static uint32_t parse_adv_report_data(const ble_gap_evt_adv_report_t* p_adv_repo
 		uint8_t field_len = p_data[index];
 		uint8_t field_type = p_data[index + 1];
 
+		if (field_len == 0 || index + 2 >= len)
+			break;
+
 		auto field_data = (*pp_type_data)[field_type];
 		field_data.len = field_len - 1;
 		memset(field_data.p_data, 0, DATA_BUFFER_SIZE);
 		memcpy(field_data.p_data, &p_data[index + 2], field_data.len);
 
 		pp_type_data->insert_or_assign(field_type, field_data);		
-		log_level(LOG_TRACE, " type:%x datalen:%d", field_type, field_len);
+		log_level(LOG_TRACE, " len:%d, type:0x%x data[0]:0x%x", field_len, field_type, field_data.p_data[0]);
 
 		index += field_len + 1;
 	}
