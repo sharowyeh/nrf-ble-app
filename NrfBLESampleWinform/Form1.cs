@@ -396,8 +396,16 @@ namespace NrfBLESampleWinform
                 comboBoxReadReportChar.Items.Clear();
                 for (int i = 0; i < l; i++)
                 {
-                    comboBoxWriteReportChar.Items.Add($"{r[i * 2]:x02} {r[i * 2 + 1]:x02} {h[i]:x04}");
-                    comboBoxReadReportChar.Items.Add($"{r[i * 2]:x02} {r[i * 2 + 1]:x02} {h[i]:x04}");
+                    if (r[i * 2] == 0 && r[i * 2 + 1] == 0)
+                    {
+                        comboBoxWriteReportChar.Items.Add($"{h[i]:x04}");
+                        comboBoxReadReportChar.Items.Add($"{h[i]:x04}");
+                    }
+                    else
+                    {
+                        comboBoxWriteReportChar.Items.Add($"{r[i * 2]:x02} {r[i * 2 + 1]:x02} {h[i]:x04}");
+                        comboBoxReadReportChar.Items.Add($"{r[i * 2]:x02} {r[i * 2 + 1]:x02} {h[i]:x04}");
+                    }
                 }
                 if (l > 0)
                 {

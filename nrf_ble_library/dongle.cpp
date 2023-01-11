@@ -138,6 +138,7 @@ typedef struct _dev_char_t {
 	bool report_ref_is_read = false; /* report reference is read */
 	uint16_t cccd_handle = 0; /* none zero which has BLE_UUID_CCCD desc */
 	bool cccd_enabled = false; /* enable state of BLE_UUID_CCCD desc */
+	ble_gatt_char_props_t char_props = { 0 }; /* 7 bytes as properties indicate read, write or notify */
 	std::vector<ble_gattc_desc_t> desc_list;
 } dev_char_t;
 
@@ -1061,7 +1062,9 @@ static uint32_t set_cccd_notification(uint16_t handle)
 					m_char_list[i].report_ref[0], m_char_list[i].report_ref[1]);
 			}
 
-			if (m_char_list[i].report_ref_is_read || m_char_list[i].cccd_enabled) {
+			if (/*m_char_list[i].report_ref_is_read || m_char_list[i].cccd_enabled*/
+				m_char_list[i].char_props.read || 
+				m_char_list[i].char_props.write) {
 				count++;
 			}
 		}
@@ -1071,7 +1074,7 @@ static uint32_t set_cccd_notification(uint16_t handle)
 		m_cond_find.notify_all();
 
 		for (auto &fn : m_callback_fn_list[FN_ON_SERVICE_ENABLED]) {
-			// return number of characteristics
+			// return number of characteristics can be read/write
 			((fn_on_service_enabled)fn)(count);
 		}
 	}
@@ -1264,7 +1267,9 @@ uint32_t report_char_list(uint16_t *handle_list, uint8_t *refs_list, uint16_t *l
 
 	uint16_t count = 0;
 	for (int i = 0; i < m_char_list.size() && count < *len; i++) {
-		if (m_char_list[i].report_ref_is_read) {
+		if (/*m_char_list[i].report_ref_is_read*/
+			m_char_list[i].char_props.read ||
+			m_char_list[i].char_props.write) {
 			handle_list[count] = m_char_list[i].handle;
 			memcpy_s(&(refs_list[count * 2]), 2, &(m_char_list[i].report_ref[0]), 2);
 			count++;
@@ -1480,7 +1485,7 @@ static void on_adv_report(const ble_gap_evt_t * const p_ble_gap_evt)
 		}
 		//m_adv_list.insert_or_assign(addr_num, p_ble_gap_evt->params.adv_report);
 
-		parse_adv_report_data(&p_ble_gap_evt->params.adv_report, &m_adv_list[addr_num].type_data_list);
+		parse_adv_report_data(&p_ble_gap_evt->params.adv_report, &(m_adv_list[addr_num].type_data_list));
 		log_level(LOG_TRACE, "Scan addr:%llx parsed advertising data list:%lu", addr_num, m_adv_list[addr_num].type_data_list.size());
 	} // end of if(near)
 	
@@ -1739,6 +1744,7 @@ static void on_characteristic_discovery_response(const ble_gattc_evt_t * const p
 		dev_char.handle_decl = p_ble_gattc_evt->params.char_disc_rsp.chars[i].handle_decl;
 		dev_char.handle_range.start_handle = dev_char.handle_decl;
 		dev_char.handle_range.end_handle = m_service_end_handle;
+		dev_char.char_props = p_ble_gattc_evt->params.char_disc_rsp.chars[i].char_props;
 		// TODO: should check item exists by handle?
 		m_char_list.push_back(dev_char);
 

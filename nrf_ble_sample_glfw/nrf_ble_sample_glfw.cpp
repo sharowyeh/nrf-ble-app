@@ -254,8 +254,12 @@ void on_dev_service_enabled(uint16_t count)
 		sprintf_s(tmp, "0x%x", rep.handle);
 		rep.handle_str = std::string(tmp);
 		rep.label = (const char*)calloc(128, sizeof(char));
-		if (rep.label != NULL)
-			sprintf_s((char*)rep.label, 128, "0x%04x 0x%02x 0x%02x", rep.handle, rep.report_refs[0], rep.report_refs[1]);
+		if (rep.label != NULL) {
+			if (rep.report_refs[0] == 0 && rep.report_refs[1] == 0)
+				sprintf_s((char*)rep.label, 128, "0x%04x", rep.handle);
+			else
+				sprintf_s((char*)rep.label, 128, "0x%04x 0x%02x 0x%02x", rep.handle, rep.report_refs[0], rep.report_refs[1]);
+		}
 		report_items.push_back(rep);
 	}
 	fflush(stdout);
