@@ -3,6 +3,13 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+# specific cmdlet file
+*.csv
+
+# speicifc uecc keygen store
+*.spk
+*.mpk
+
 # Referenced repository
 .vscode
 
