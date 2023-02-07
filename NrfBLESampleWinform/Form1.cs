@@ -37,9 +37,45 @@ namespace NrfBLESampleWinform
         private bool connected = false;
         private bool authenticated = false;
 
+        private static Form1 inst;
+        private FormCmdlet cmdlet = new FormCmdlet("");
+
+        public static void SetCmdlet(string direction, string reportChar, string hexString)
+        {
+            if (inst == null)
+                return;
+
+            // make sure in UI thread
+            inst.Invoke(new Action(() =>
+            {
+                var comboReportChar = inst.comboBoxWriteReportChar;
+                var textData = inst.textBoxWriteData;
+                var button = inst.buttonWrite;
+                if (direction == "READ")
+                {
+                    comboReportChar = inst.comboBoxReadReportChar;
+                    textData = inst.textBoxReadData;
+                    button = inst.buttonRead;
+                }
+
+                foreach (var i in comboReportChar.Items)
+                {
+                    if (i is string && ((string)i).Contains(reportChar))
+                    {
+                        comboReportChar.SelectedItem = i;
+                        textData.Text = hexString;
+                        button.PerformClick();
+                        break;
+                    }
+                }
+            }));
+        }
+
         public Form1()
         {
             InitializeComponent();
+
+            inst = this;
 
             // binding discovered list to items of combobox control
             var binding = new BindingSource();
@@ -94,6 +130,39 @@ namespace NrfBLESampleWinform
             comboBoxIoCaps.Items.Add("None");          // BLE_GAP_IO_CAPS_NONE 0x03
             comboBoxIoCaps.Items.Add("Kbd + Display"); // BLE_GAP_IO_CAPS_KEYBOARD_DISPLAY 0x04
             comboBoxIoCaps.SelectedIndex = 2;
+
+            // given cmdlet dataset file, csv type separated by comma, and using sharp# for comments
+            var files = System.IO.Directory.GetFiles(".", "*.csv");
+            comboBoxCmdletFiles.Items.Clear();
+            comboBoxCmdletFiles.Items.AddRange(files);
+            if (comboBoxCmdletFiles.Items.Count > 0)
+                comboBoxCmdletFiles.SelectedIndex = 0;
+            buttonCmdlet.Click += ButtonCmdlet_Click;
+
+            this.FormClosing += Form1_FormClosing;
+        }
+
+        private void ButtonCmdlet_Click(object sender, EventArgs e)
+        {
+            //TODO: check ble connection before open cmdlet form
+
+            var filepath = "";
+            if (comboBoxCmdletFiles.SelectedIndex >= 0)
+            {
+                filepath = comboBoxCmdletFiles.SelectedItem.ToString();
+                cmdlet.LoadCmdletFile(filepath);
+                cmdlet.Show(this);
+            }
+            else
+            {
+                MessageBox.Show($"No cmdlet file present:{filepath}");
+            }
+        }
+
+        private void Form1_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            NrfBLELibrary.DongleDisconnect();
+            NrfBLELibrary.DongleReset();
         }
 
         private void ComboBoxDiscovered_SelectedIndexChanged(object sender, EventArgs e)

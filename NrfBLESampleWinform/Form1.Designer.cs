@@ -66,16 +66,18 @@
             this.label10 = new System.Windows.Forms.Label();
             this.textBoxPasskey = new System.Windows.Forms.TextBox();
             this.buttonRenewKeypair = new System.Windows.Forms.Button();
+            this.buttonCmdlet = new System.Windows.Forms.Button();
+            this.comboBoxCmdletFiles = new System.Windows.Forms.ComboBox();
             this.SuspendLayout();
             // 
             // textBoxLog
             // 
-            this.textBoxLog.Location = new System.Drawing.Point(222, 104);
+            this.textBoxLog.Location = new System.Drawing.Point(222, 134);
             this.textBoxLog.Multiline = true;
             this.textBoxLog.Name = "textBoxLog";
             this.textBoxLog.ReadOnly = true;
             this.textBoxLog.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.textBoxLog.Size = new System.Drawing.Size(550, 376);
+            this.textBoxLog.Size = new System.Drawing.Size(550, 346);
             this.textBoxLog.TabIndex = 0;
             // 
             // textBoxSerialPort
@@ -413,10 +415,29 @@
             this.buttonRenewKeypair.Text = "Renew keypair";
             this.buttonRenewKeypair.UseVisualStyleBackColor = true;
             // 
+            // buttonCmdlet
+            // 
+            this.buttonCmdlet.Location = new System.Drawing.Point(652, 103);
+            this.buttonCmdlet.Name = "buttonCmdlet";
+            this.buttonCmdlet.Size = new System.Drawing.Size(120, 25);
+            this.buttonCmdlet.TabIndex = 41;
+            this.buttonCmdlet.Text = "Cmdlet";
+            this.buttonCmdlet.UseVisualStyleBackColor = true;
+            // 
+            // comboBoxCmdletFiles
+            // 
+            this.comboBoxCmdletFiles.FormattingEnabled = true;
+            this.comboBoxCmdletFiles.Location = new System.Drawing.Point(438, 103);
+            this.comboBoxCmdletFiles.Name = "comboBoxCmdletFiles";
+            this.comboBoxCmdletFiles.Size = new System.Drawing.Size(208, 25);
+            this.comboBoxCmdletFiles.TabIndex = 42;
+            // 
             // Form1
             // 
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.None;
             this.ClientSize = new System.Drawing.Size(784, 491);
+            this.Controls.Add(this.comboBoxCmdletFiles);
+            this.Controls.Add(this.buttonCmdlet);
             this.Controls.Add(this.buttonRenewKeypair);
             this.Controls.Add(this.label10);
             this.Controls.Add(this.textBoxPasskey);
@@ -503,6 +524,8 @@
         private System.Windows.Forms.Label label10;
         private System.Windows.Forms.TextBox textBoxPasskey;
         private System.Windows.Forms.Button buttonRenewKeypair;
+        private System.Windows.Forms.Button buttonCmdlet;
+        private System.Windows.Forms.ComboBox comboBoxCmdletFiles;
     }
 }
 
