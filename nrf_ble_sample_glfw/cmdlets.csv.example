@@ -1,0 +1,2 @@
+#Caption,ReportChar,Direction,HexString
+#Command1,12 AB,WRITE,11 22 EE FF

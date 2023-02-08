@@ -5,6 +5,8 @@
 #include <vector>
 #include <mutex>
 #include <condition_variable>
+#include <filesystem>
+#include <fstream>
 
 #include "dongle.h"
 
@@ -26,6 +28,8 @@
 
 //overloads for ImGui namespace
 #include "nrf_ble_widget.h"
+
+#include "helper.h"
 
 #pragma region widget status
 
@@ -99,6 +103,20 @@ static int write_report_selected = -1;
 static const char* write_report_item = NULL;
 static int read_report_selected = -1;
 static const char* read_report_item = NULL;
+
+typedef struct _cmdlet_t {
+	std::string caption;
+	std::string report_char;
+	std::string direction;
+	std::string hex_string;
+	uint8_t report_refs[2] = {0};
+	const char* label = NULL; // for imgui preview text, or useless?
+} cmdlet;
+
+std::vector<cmdlet> cmdlet_items;
+static bool show_cmdlet_window = false;
+static std::vector<std::string> cmdlet_files;
+static const char* cmdlet_file = NULL;
 
 #pragma endregion
 
@@ -564,15 +582,42 @@ static void draw_conn_layout() {
 
 static char write_data_str[128] = "00 00 00 00";
 static char read_data_str[128] = "00 00 00 00";
-std::vector<std::string> split(std::string str, std::string delimiter) {
-	std::vector<std::string> result;
-	size_t pos = 0;
-	while (pos <= str.size()) {
-		auto token = str.substr(pos, str.find(delimiter, pos) - pos);
-		result.push_back(token);
-		pos += token.length() + delimiter.length();
+
+static void report_button_write_clicked()
+{
+	if (write_report_selected == -1 || write_report_item == NULL || strlen(write_report_item) == 0) {
+		msg_window_text = "No endpoint selected";
+		show_msg_window = true;
 	}
-	return result;
+	else {
+		std::string data = std::string(write_data_str);
+		auto sp = split(data, " ");
+		if (sp.size() > 0) {
+			uint8_t* bytes = (uint8_t*)calloc(sp.size(), sizeof(uint8_t));
+			if (bytes != NULL) {
+				for (size_t i = 0; i < sp.size(); i++)
+					bytes[i] = strtoul(sp[i].c_str(), NULL, 16);
+				auto ble_code = data_write(report_items[write_report_selected].handle, bytes, sp.size(), 2000);
+			}
+		}
+	}
+}
+
+static void report_button_read_clicked()
+{
+	if (read_report_selected == -1 || read_report_item == NULL || strlen(read_report_item) == 0) {
+		msg_window_text = "No endpoint selected";
+		show_msg_window = true;
+	}
+	else {
+		uint8_t bytes[256] = { 0 };
+		uint16_t len = 256;
+		auto ble_code = data_read(report_items[read_report_selected].handle, bytes, &len, 2000);
+		if (ble_code == 0) {
+			for (int i = 0; i < len && i * 3 < 128; i++)
+				sprintf_s(&read_data_str[i * 3], 4, "%02x ", bytes[i]);
+		}
+	}
 }
 
 static void draw_report_layout() {
@@ -594,22 +639,7 @@ static void draw_report_layout() {
 	}
 
 	if (ImGui::Button("Write")) {
-		if (write_report_selected == -1 || write_report_item == NULL || strlen(write_report_item) == 0) {
-			msg_window_text = "No endpoint selected";
-			show_msg_window = true;
-		}
-		else {
-			std::string data = std::string(write_data_str);
-			auto sp = split(data, " ");
-			if (sp.size() > 0) {
-				uint8_t* bytes = (uint8_t*)calloc(sp.size(), sizeof(uint8_t));
-				if (bytes != NULL) {
-					for (size_t i = 0; i < sp.size(); i++)
-						bytes[i] = strtoul(sp[i].c_str(), NULL, 16);
-					auto ble_code = data_write(report_items[write_report_selected].handle, bytes, sp.size(), 2000);
-				}
-			}
-		}
+		report_button_write_clicked();
 	}
 	ImGui::SameLine();
 	//TODO: try play with ImGuiInputTextFlags_CharsHexadecimal?
@@ -632,22 +662,106 @@ static void draw_report_layout() {
 	}
 
 	if (ImGui::Button("Read")) {
-		if (read_report_selected == -1 || read_report_item == NULL || strlen(read_report_item) == 0) {
-			msg_window_text = "No endpoint selected";
-			show_msg_window = true;
-		}
-		else {
-			uint8_t bytes[256] = { 0 };
-			uint16_t len = 256;
-			auto ble_code = data_read(report_items[read_report_selected].handle, bytes, &len, 2000);
-			if (ble_code == 0) {
-				for (int i = 0; i < len && i * 3 < 128; i++)
-					sprintf_s(&read_data_str[i * 3], 4, "%02x ", bytes[i]);
-			}
-		}
+		report_button_read_clicked();
 	}
 	ImGui::SameLine();
 	ImGui::InputText("##readdata", read_data_str, IM_ARRAYSIZE(read_data_str));
+}
+
+static void read_cmdlet_file() {
+	
+	if (cmdlet_file == NULL)
+		return;
+
+	cmdlet_items.clear();
+
+	std::fstream file;
+	file.open(cmdlet_file, std::ios::in);
+	std::string line;
+	while (std::getline(file, line)) {
+		trim(line);
+		if (line.rfind("#", 0) == 0)
+			continue;
+		auto sp = split(line, ",");
+		if (sp.size() < 4)
+			continue;
+
+		// report char string to refs bytes
+		trim(sp[1]);
+		auto refsp = split(sp[1], " ");
+		if (refsp.size() < 2)
+			continue;
+
+		cmdlet c = {
+			.caption = sp[0], 
+			.report_char = sp[1],
+			.direction = sp[2],
+			.hex_string = sp[3] };
+		c.report_refs[0] = strtoul(refsp[0].c_str(), NULL, 16);
+		c.report_refs[1] = strtoul(refsp[1].c_str(), NULL, 16);
+		cmdlet_items.push_back(c);
+	}
+	file.close();
+}
+
+static void draw_cmdlet_layout() {
+	
+	ImGui::Checkbox("Show cmdlet widget", &show_cmdlet_window);
+	if (cmdlet_file == NULL)
+		show_cmdlet_window = false;
+
+	ImGui::SameLine();
+	if (ImGui::BeginCombo("##cmdletfiles", cmdlet_file)) {
+		for (int i = 0; i < cmdlet_files.size(); i++) {
+			const bool is_selected = (cmdlet_file != NULL && _stricmp(cmdlet_file, cmdlet_files[i].c_str()) == 0);
+			if (ImGui::Selectable(cmdlet_files[i], cmdlet_files[i].c_str(), is_selected)) {
+				cmdlet_file = cmdlet_files[i].c_str();
+				read_cmdlet_file();
+			}
+
+			if (is_selected)
+				ImGui::SetItemDefaultFocus();
+		}
+		ImGui::EndCombo();
+	}
+
+	if (show_cmdlet_window == false)
+		return;
+
+	if (cmdlet_items.empty())
+		return;
+
+	ImGui::Begin("Cmdlet Widget", &show_cmdlet_window);
+
+	for (auto it = cmdlet_items.begin(); it != cmdlet_items.end(); it++) {
+		if (ImGui::Button(it->caption.c_str())) {
+			for (int i = 0; i < report_items.size(); i++) {
+				if (report_items[i].report_refs[0] == it->report_refs[0] &&
+					report_items[i].report_refs[1] == it->report_refs[1]) {
+					if (_stricmp(it->direction.c_str(), "READ") == 0) {
+						read_report_selected = i;
+						read_report_item = report_items[i].label;
+						strcpy_s(read_data_str, it->hex_string.c_str());
+						// perform read button click
+						report_button_read_clicked();
+					}
+					else {
+						write_report_selected = i;
+						write_report_item = report_items[i].label;
+						strcpy_s(write_data_str, it->hex_string.c_str());
+						// perform write button click
+						report_button_write_clicked();
+					}
+				}
+			}
+		}
+		ImGui::SameLine();
+		ImGui::Text("%s %s %s", it->report_char.c_str(), it->direction.c_str(), it->hex_string.c_str());
+	}
+
+	if (ImGui::Button("Close"))
+		show_cmdlet_window = false;
+	ImGui::End();
 }
 
 static void draw_main_widget() {
@@ -665,7 +779,7 @@ static void draw_main_widget() {
 	draw_conn_layout();
 	ImGui::Separator();
 	draw_report_layout();
-
+	draw_cmdlet_layout();
 
 	ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 	ImGui::End();
@@ -712,6 +826,12 @@ int main()
 	// default first window size, TODO: or read from imgui.ini?
 	ImGui::SetNextWindowPos(ImVec2(0, 0));
 	ImGui::SetNextWindowSize(ImVec2(500, 300));
+
+	// get cmdlet file list from working directory
+	for (const auto& entry : std::filesystem::directory_iterator(".")) {
+		if (entry.is_regular_file() && entry.path().extension().compare(".csv") == 0)
+			cmdlet_files.push_back(entry.path().string());
+	}
 
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
