@@ -1798,6 +1798,7 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 			std::max(m_service_start_handle, p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle);
 
 		// check characteristic index of m_char_list
+		// NOTE: asume that the characteristic descriptor(0x2803) is the first descriptor
 		if (p_ble_gattc_evt->params.desc_disc_rsp.descs[i].uuid.uuid == BLE_UUID_CHARACTERISTIC)
 		{
 			auto decl = p_ble_gattc_evt->params.desc_disc_rsp.descs[i].handle;
@@ -1868,9 +1869,16 @@ static void on_descriptor_discovery_response(const ble_gattc_evt_t * const p_ble
 
 	}
 
-	// TODO: may check all descrs are responsed? before move to the next char or back to discover char
-
-	if (m_char_idx < m_char_list.size() - 1) {
+	// DEBUG: check all descrs are responsed before move to the next char or continue to get rest of descrs
+	if (m_char_idx < m_char_list.size() &&
+		m_discovered_handle < m_char_list[m_char_idx].handle_range.end_handle) {
+		// new range for the rest of descriptors to current characteristic
+		auto range = m_char_list[m_char_idx].handle_range;
+		range.start_handle = m_discovered_handle + 1;
+		log_level(LOG_DEBUG, " DEBUG: is discovered_handle %x < end_handle %x?", m_discovered_handle, m_char_list[m_char_idx].handle_range.end_handle);
+		descr_discovery_start(range);
+	}
+	else if (m_char_idx < m_char_list.size() - 1) {
 		// move to find descriptors of the next characteristic
 		descr_discovery_start(m_char_list[++m_char_idx].handle_range);
 	}
