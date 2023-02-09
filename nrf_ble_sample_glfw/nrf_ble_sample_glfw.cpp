@@ -5,6 +5,7 @@
 #include <vector>
 #include <mutex>
 #include <condition_variable>
+// filesystem requires cpp17+
 #include <filesystem>
 #include <fstream>
 
@@ -827,7 +828,7 @@ int main()
 	ImGui::SetNextWindowPos(ImVec2(0, 0));
 	ImGui::SetNextWindowSize(ImVec2(500, 300));
 
-	// get cmdlet file list from working directory
+	// get cmdlet file list from working directory, filesystem requires cpp17+
 	for (const auto& entry : std::filesystem::directory_iterator(".")) {
 		if (entry.is_regular_file() && entry.path().extension().compare(".csv") == 0)
 			cmdlet_files.push_back(entry.path().string());
